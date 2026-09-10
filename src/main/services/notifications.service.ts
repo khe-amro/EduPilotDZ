@@ -1,14 +1,20 @@
 import { getSqlite } from '../database/connection'
 import { listBackups } from './backup.service'
+import { getStudentsDebtReport } from './payment.service'
 
 export interface SystemNotification {
   id: string
   type: 'debt' | 'backup' | 'schedule' | 'card' | 'system'
   title: string
   message: string
+  titleAr?: string
+  messageAr?: string
+  titleFr?: string
+  messageFr?: string
   severity: 'info' | 'warning' | 'critical'
   timestamp: string
   actionLink?: string
+  meta?: Record<string, any>
 }
 
 const dismissedIds = new Set<string>()
@@ -17,34 +23,31 @@ export async function getSystemNotifications(): Promise<SystemNotification[]> {
   const sqlite = getSqlite()
   const notifications: SystemNotification[] = []
 
-  // 1. Check for Students with Debt
+  // 1. Check for Students with Outstanding Tuition Debt (using canonical debt engine)
   try {
-    const debtRows = sqlite.prepare(`
-      SELECT s.id, s.first_name_ar, s.last_name_ar, s.first_name_fr, s.last_name_fr,
-             SUM(e.agreed_price) - COALESCE(SUM(p.amount), 0) as net_debt
-      FROM students s
-      JOIN enrollments e ON s.id = e.student_id AND e.status = 'active'
-      LEFT JOIN payments p ON e.id = p.enrollment_id AND p.status = 'completed'
-      WHERE s.status = 'active'
-      GROUP BY s.id
-      HAVING net_debt > 0
-      ORDER BY net_debt DESC
-      LIMIT 10
-    `).all() as any[]
+    const debtReport = await getStudentsDebtReport()
+    const overdueStudents = debtReport.filter((item) => (item.totalDebt || 0) > 0)
+    const totalDebt = overdueStudents.reduce((acc, r) => acc + (r.totalDebt || 0), 0)
 
-    if (debtRows.length > 0) {
-      const totalDebt = debtRows.reduce((acc, r) => acc + (r.net_debt || 0), 0)
+    if (overdueStudents.length > 0 && totalDebt > 0) {
       notifications.push({
-        id: `debt_summary_${new Date().toISOString().slice(0, 10)}`,
+        id: `debt_summary_${overdueStudents.length}_${totalDebt}`,
         type: 'debt',
         title: 'Outstanding Student Debt',
-        message: `${debtRows.length} active students currently have outstanding balances totaling ${totalDebt.toLocaleString()} DZD.`,
+        message: `${overdueStudents.length} active student(s) currently have outstanding balances totaling ${totalDebt.toLocaleString()} DZD.`,
+        titleAr: 'مستحقات طلابية غير مسددة',
+        messageAr: `يوجد ${overdueStudents.length} تلميذ لديهم مستحقات مالية غير مسددة بإجمالي ${totalDebt.toLocaleString()} دج.`,
+        titleFr: 'Créances élèves impayées',
+        messageFr: `${overdueStudents.length} élève(s) ont des soldes débiteurs pour un total de ${totalDebt.toLocaleString()} DZD.`,
         severity: totalDebt > 50000 ? 'critical' : 'warning',
         timestamp: new Date().toISOString(),
         actionLink: '/payments',
+        meta: { count: overdueStudents.length, totalDebt },
       })
     }
-  } catch {}
+  } catch (err) {
+    console.error('Failed to compute debt notifications:', err)
+  }
 
   // 2. Check Backup Health
   try {
@@ -55,6 +58,10 @@ export async function getSystemNotifications(): Promise<SystemNotification[]> {
         type: 'backup',
         title: 'No Database Backups Found',
         message: 'No system backups have been created yet. Create an offline snapshot to safeguard school data.',
+        titleAr: 'لم يتم العثور على نسخ احتياطية',
+        messageAr: 'لم يتم إنشاء أي نسخة احتياطية بعد. يُرجى إنشاء نسخة احتياطية فوراً لحماية بيانات المؤسسة.',
+        titleFr: 'Aucune sauvegarde trouvée',
+        messageFr: 'Aucune sauvegarde système n\'a été créée. Créez un instantané hors ligne pour protéger vos données.',
         severity: 'critical',
         timestamp: new Date().toISOString(),
         actionLink: '/settings',
@@ -69,6 +76,10 @@ export async function getSystemNotifications(): Promise<SystemNotification[]> {
           type: 'backup',
           title: 'Database Backup Overdue',
           message: `The last database backup was created ${Math.floor(daysSince)} days ago (${latest.createdAt.slice(0, 10)}). Recommended backup interval is weekly.`,
+          titleAr: 'النسخة الاحتياطية متأخرة',
+          messageAr: `آخر نسخة احتياطية أُنشئت منذ ${Math.floor(daysSince)} يوماً (${latest.createdAt.slice(0, 10)}). يُوصى بأخذ نسخة أسبوعياً.`,
+          titleFr: 'Sauvegarde en retard',
+          messageFr: `La dernière sauvegarde date de ${Math.floor(daysSince)} jours (${latest.createdAt.slice(0, 10)}). L'intervalle recommandé est hebdomadaire.`,
           severity: 'warning',
           timestamp: new Date().toISOString(),
           actionLink: '/settings',
@@ -94,6 +105,10 @@ export async function getSystemNotifications(): Promise<SystemNotification[]> {
         type: 'card',
         title: 'Student Cards Expiring Soon',
         message: `${expiringRows.cnt} active student cards will expire within the next 30 days.`,
+        titleAr: 'بطاقات طلابية قريبة الانتهاء',
+        messageAr: `تنتهي صلاحية ${expiringRows.cnt} بطاقة مدرسية نشطة خلال الـ 30 يوماً القادمة.`,
+        titleFr: 'Cartes élèves expirant bientôt',
+        messageFr: `${expiringRows.cnt} cartes actives expireront dans les 30 prochains jours.`,
         severity: 'info',
         timestamp: new Date().toISOString(),
         actionLink: '/students',
@@ -128,6 +143,10 @@ export async function getSystemNotifications(): Promise<SystemNotification[]> {
         type: 'schedule',
         title: 'Room Schedule Conflict Detected',
         message: `Conflict in Room "${conflictRows[0].room}": Group "${conflictRows[0].group1}" and "${conflictRows[0].group2}" overlap in weekly timetable.`,
+        titleAr: 'تعارض في توقيت القاعات',
+        messageAr: `تعارض في القاعة "${conflictRows[0].room}": يتداخل توقيت الفوجين "${conflictRows[0].group1}" و "${conflictRows[0].group2}".`,
+        titleFr: 'Conflit de salle détecté',
+        messageFr: `Conflit en salle "${conflictRows[0].room}" : les groupes "${conflictRows[0].group1}" et "${conflictRows[0].group2}" se chevauchent.`,
         severity: 'warning',
         timestamp: new Date().toISOString(),
         actionLink: '/schedules',

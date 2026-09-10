@@ -390,6 +390,7 @@ export default function Payments() {
         setReceiptModal(res.data)
         setPrintError(null)
         await load()
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
 
         // Auto print receipt if configured in settings
         if (schoolSettings?.autoPrintReceipt && schoolSettings?.receiptPrinterName) {
@@ -422,7 +423,12 @@ export default function Payments() {
     setSaving(true)
     try {
       const res = await window.schoolApp.payments.transfer({ fromEnrollmentId: showTransfer.enrollmentId, toEnrollmentId: Number(toEnrollmentId), studentId: showTransfer.studentId })
-      if (res.success) { setShowTransfer(null); setToEnrollmentId(''); await load() }
+      if (res.success) {
+        setShowTransfer(null)
+        setToEnrollmentId('')
+        await load()
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
+      }
       else setError(res.error ?? t('common.error'))
     } finally { setSaving(false) }
   }
@@ -432,7 +438,11 @@ export default function Payments() {
     setSaving(true)
     try {
       const res = await window.schoolApp.payments.refund({ enrollmentId: showRefund.enrollmentId, studentId: showRefund.studentId })
-      if (res.success) { setShowRefund(null); await load() }
+      if (res.success) {
+        setShowRefund(null)
+        await load()
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
+      }
       else setError(res.error ?? t('common.error'))
     } finally { setSaving(false) }
   }
@@ -441,6 +451,7 @@ export default function Payments() {
     if (!window.confirm(t('payments.cancelConfirm'))) return
     await window.schoolApp.payments.cancel(id)
     await load()
+    window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
   }
 
   const handlePrintReceipt = async () => {

@@ -568,7 +568,10 @@ export default function Students() {
       <StudentImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        onImportComplete={() => load()}
+        onImportComplete={() => {
+          load()
+          window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
+        }}
       />
     </div>
   )

@@ -633,6 +633,7 @@ export default function StudentProfile() {
         await loadEnrollmentsWithBalances(student.id)
         const payListRes = await window.schoolApp.payments.byStudent(student.id)
         if (payListRes.success && payListRes.data) setPayments(payListRes.data)
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
       } else {
         alert(res.error ?? t('common.error'))
       }
@@ -666,6 +667,7 @@ export default function StudentProfile() {
         setModalTeacher('')
         setModalGroup('')
         await loadEnrollmentsWithBalances(student.id)
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
       } else {
         alert(res.error)
       }
@@ -694,6 +696,7 @@ export default function StudentProfile() {
         await loadEnrollmentsWithBalances(student.id)
         const payListRes = await window.schoolApp.payments.byStudent(student.id)
         if (payListRes.success && payListRes.data) setPayments(payListRes.data)
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
 
         alert(t('students.transferSuccess'))
       } else {

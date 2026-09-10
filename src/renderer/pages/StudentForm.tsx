@@ -64,6 +64,7 @@ export default function StudentForm() {
         ? await window.schoolApp.students.update(Number(id), payload)
         : await window.schoolApp.students.create(payload)
       if (res.success && res.data) {
+        window.dispatchEvent(new CustomEvent('app:notifications-refresh'))
         navigate(`/students/${res.data.id}`)
       } else {
         setError(!res.success ? res.error ?? t('common.error') : t('common.error'))
