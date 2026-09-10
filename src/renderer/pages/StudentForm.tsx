@@ -92,11 +92,11 @@ export default function StudentForm() {
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">{t('students.nameArSection')}</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>{t('students.lastNameAr')} *</label>
+              <label className={labelCls}><span>{t('students.lastNameAr')}</span> <span className="text-red-500 font-bold">*</span></label>
               <input className={inputCls} value={form.lastNameAr} onChange={set('lastNameAr')} dir="rtl" required />
             </div>
             <div>
-              <label className={labelCls}>{t('students.firstNameAr')} *</label>
+              <label className={labelCls}><span>{t('students.firstNameAr')}</span> <span className="text-red-500 font-bold">*</span></label>
               <input className={inputCls} value={form.firstNameAr} onChange={set('firstNameAr')} dir="rtl" required />
             </div>
           </div>
@@ -107,11 +107,11 @@ export default function StudentForm() {
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">{t('students.nameFrSection')}</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>{t('students.lastNameFr')} *</label>
+              <label className={labelCls}><span>{t('students.lastNameFr')}</span> <span className="text-red-500 font-bold">*</span></label>
               <input className={inputCls} value={form.lastNameFr} onChange={set('lastNameFr')} required />
             </div>
             <div>
-              <label className={labelCls}>{t('students.firstNameFr')} *</label>
+              <label className={labelCls}><span>{t('students.firstNameFr')}</span> <span className="text-red-500 font-bold">*</span></label>
               <input className={inputCls} value={form.firstNameFr} onChange={set('firstNameFr')} required />
             </div>
           </div>

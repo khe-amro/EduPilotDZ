@@ -11,9 +11,13 @@ export type CourseStatus = 'active' | 'inactive'
 export type GroupStatus = 'active' | 'inactive' | 'completed'
 export type EnrollmentStatus = 'active' | 'inactive' | 'completed'
 export type SessionStatus = 'open' | 'closed'
-export type AdminRole = 'superadmin' | 'admin'
+export type UserRole = 'owner' | 'superadmin' | 'admin' | 'secretary' | 'registrar' | 'accountant' | 'teacher' | 'viewer'
+export type AdminRole = UserRole // alias for backward compatibility
 export type Language = 'ar' | 'fr' | 'en'
 export type Gender = 'male' | 'female'
+export type BillingModel = 'MONTHLY' | 'PER_SESSION' | 'SESSION_PACKAGE' | 'FIXED_COURSE_PRICE' | 'FREE'
+export type CardStatus = 'ACTIVE' | 'LOST' | 'REPLACED' | 'DISABLED' | 'EXPIRED'
+export type DocumentType = 'id_card' | 'birth_certificate' | 'medical_certificate' | 'enrollment_form' | 'registration_form' | 'contract' | 'medical' | 'other'
 
 // ─── Entity types (subset of DB columns safe for renderer) ───────────────────
 
@@ -21,8 +25,10 @@ export interface Administrator {
   id: number
   username: string
   fullName: string
-  role: AdminRole
+  role: UserRole
   preferredLanguage: Language
+  teacherId?: number | null
+  photoPath?: string | null
   isActive: boolean
   lastLoginAt: string | null
   createdAt: string
@@ -77,6 +83,8 @@ export interface Course {
   descriptionFr: string | null
   descriptionEn: string | null
   defaultPrice: number
+  billingModel?: BillingModel
+  packageSessionCount?: number | null
   status: CourseStatus
   createdAt: string
   updatedAt: string
@@ -91,6 +99,9 @@ export interface Group {
   scheduleJson: string | null
   capacity: number
   monthlyPrice: number
+  billingModel?: BillingModel
+  packageSessionCount?: number | null
+  fixedPrice?: number | null
   startDate: string
   endDate: string | null
   status: GroupStatus
@@ -107,6 +118,10 @@ export interface Enrollment {
   studentId: number
   groupId: number
   agreedPrice: number
+  billingModel?: BillingModel
+  packageTotalSessions?: number | null
+  packageSessionsConsumed?: number
+  packageRemainingSessions?: number
   enrollmentDate: string
   status: EnrollmentStatus
   createdAt: string
@@ -121,6 +136,102 @@ export interface Enrollment {
   teacherName?: string
 }
 
+export interface Guardian {
+  id: number
+  fullName: string
+  phone: string | null
+  whatsappPhone: string | null
+  email: string | null
+  address: string | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StudentGuardianLink {
+  id: number
+  studentId: number
+  guardianId: number
+  relationship: string
+  isPrimary: boolean
+  guardian?: Guardian
+}
+
+export interface FamilySummary {
+  guardian: Guardian
+  students: Array<Student & { activeEnrollmentsCount: number; totalBalance: number }>
+  totalFamilyBalance: number
+}
+
+export interface StudentCardInfo {
+  id: number
+  studentId: number
+  cardToken: string
+  status: CardStatus
+  issuedAt: string
+  expiresAt: string | null
+  replacedByCardId: number | null
+  notes: string | null
+}
+
+export interface StudentDocument {
+  id: number
+  studentId: number
+  documentType: DocumentType
+  filePath: string
+  fileName: string
+  fileSize: number
+  mimeType: string | null
+  createdAt: string
+}
+
+export interface WhatsAppTemplate {
+  id: number
+  templateKey: string
+  nameAr: string
+  nameFr: string
+  nameEn: string
+  bodyAr: string
+  bodyFr: string
+  bodyEn: string
+  isActive: boolean
+}
+
+export interface TimelineEvent {
+  id: string
+  type: 'attendance' | 'payment' | 'enrollment' | 'note' | 'card' | 'document' | 'transfer'
+  title: string
+  description: string
+  date: string
+  amount?: number
+  badge?: string
+}
+
+export interface GlobalSearchResult {
+  students: Array<{ id: number; name: string; number: string; photoUrl?: string | null; groupName?: string; balance: number }>
+  teachers: Array<{ id: number; name: string; phone?: string | null; courseName?: string }>
+  courses: Array<{ id: number; name: string; price: number }>
+  groups: Array<{ id: number; name: string; courseName: string; teacherName: string }>
+}
+
+export interface DiagnosticItem {
+  id: string
+  name: string
+  status: 'ok' | 'warning' | 'error'
+  detail: string
+}
+
+export interface DiagnosticsReport {
+  appVersion: string
+  osVersion: string
+  sqliteIntegrity: string
+  schemaVersion: number
+  userDataPath: string
+  freeDiskSpaceGb: number
+  backupStatus: string
+  printerStatus: string
+  checks: DiagnosticItem[]
+}
 
 export interface AttendanceSession {
   id: number
@@ -193,10 +304,15 @@ export interface StudentNote {
 
 export interface SchoolSettings {
   id: number
+  schoolLegalName?: string
   schoolNameAr: string
   schoolNameFr: string
   schoolNameEn: string
+  schoolLogoPath?: string | null
+  logoPath?: string | null
+  headerSubtitle?: string | null
   phone: string | null
+  whatsappPhone?: string | null
   email: string | null
   address: string | null
   academicYear: string
@@ -204,6 +320,20 @@ export interface SchoolSettings {
   studentNumberPrefix: string
   receiptPrefix: string
   defaultLanguage: Language
+  primaryAccentColor?: string
+  receiptFooter?: string | null
+  countryCode?: string
+  schoolType?: string
+  defaultBillingModel?: BillingModel
+  studentCardsEnabled?: boolean
+  whatsappEnabled?: boolean
+  teacherAccountsEnabled?: boolean
+  documentsEnabled?: boolean
+  edition?: string
+  licenseSchool?: string | null
+  licenseId?: string | null
+  licenseExpiresAt?: string | null
+  schemaVersion?: number
   backupDirectory: string | null
   automaticBackupEnabled: boolean
   backupsToRetain: number

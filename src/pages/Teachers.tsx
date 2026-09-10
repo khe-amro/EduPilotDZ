@@ -304,7 +304,7 @@ export default function Teachers() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">الاسم الأول (عربي) *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1"><span>الاسم الأول (عربي)&rlm;</span> <span className="text-red-500 font-bold">*</span></label>
               <input
                 type="text"
                 placeholder="مثال: كريم"
@@ -314,7 +314,7 @@ export default function Teachers() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">اللقب (عربي) *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1"><span>اللقب (عربي)&rlm;</span> <span className="text-red-500 font-bold">*</span></label>
               <input
                 type="text"
                 placeholder="مثال: منصوري"

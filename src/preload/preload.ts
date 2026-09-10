@@ -4,7 +4,10 @@ import type {
   ApiResult, AuthSession, Student, Teacher, Course, Group,
   Enrollment, AttendanceSession, AttendanceRecord, Payment,
   SchoolSettings, BackupInfo, QRScanResult, PaginatedResult,
-  StudentNote, PrinterInfo, ReceiptPrintData
+  StudentNote, PrinterInfo, ReceiptPrintData,
+  Guardian, StudentGuardianLink, FamilySummary, StudentCardInfo,
+  StudentDocument, DocumentType, WhatsAppTemplate, TimelineEvent,
+  GlobalSearchResult, DiagnosticsReport, AdminRole, Language
 } from '../shared/types/index'
 
 // ─── Safe invoke helper — wraps every call ───────────────────────────────────
@@ -34,21 +37,37 @@ const api = {
     getSession: () => invoke<AuthSession | null>(IPC_CHANNELS.AUTH_GET_SESSION),
     checkFirstRun: () => invoke<{ firstRun: boolean }>(IPC_CHANNELS.AUTH_CHECK_FIRST_RUN),
     completeSetup: (data: {
-      schoolNameAr: string; schoolNameFr: string; schoolNameEn?: string
+      schoolNameAr: string; schoolNameFr?: string; schoolNameEn?: string
       phone?: string; email?: string; address?: string; academicYear: string
       adminFullName: string; adminUsername: string; adminPassword: string
       preferredLanguage: 'ar' | 'fr' | 'en'
+      logoPath?: string | null; schoolType?: string
     }) => invoke<AuthSession>(IPC_CHANNELS.AUTH_COMPLETE_SETUP, data),
   },
 
   setup: {
     getStatus: () => invoke<{ firstRun: boolean }>(IPC_CHANNELS.AUTH_CHECK_FIRST_RUN),
     complete: (data: {
-      schoolNameAr: string; schoolNameFr: string; schoolNameEn?: string
+      schoolNameAr: string; schoolNameFr?: string; schoolNameEn?: string
       phone?: string; email?: string; address?: string; academicYear: string
       adminFullName: string; adminUsername: string; adminPassword: string
       preferredLanguage: 'ar' | 'fr' | 'en'
+      logoPath?: string | null; schoolType?: string
     }) => invoke<AuthSession>(IPC_CHANNELS.AUTH_COMPLETE_SETUP, data),
+  },
+
+  users: {
+    list: () => invoke<Array<{
+      id: number; username: string; fullName: string; role: AdminRole
+      preferredLanguage: Language; isActive: boolean; lastLoginAt: string | null
+      failedLoginAttempts: number; lockedUntil: string | null; createdAt: string; updatedAt: string
+    }>>(IPC_CHANNELS.AUTH_LIST_USERS),
+    create: (data: { username: string; fullName: string; role: AdminRole; password: string; preferredLanguage?: Language }) =>
+      invoke<any>(IPC_CHANNELS.AUTH_CREATE_USER, data),
+    update: (id: number, data: Partial<{ fullName: string; role: AdminRole; preferredLanguage: Language; isActive: boolean; password?: string }>) =>
+      invoke<any>(IPC_CHANNELS.AUTH_UPDATE_USER, { id, ...data }),
+    delete: (id: number) =>
+      invoke<boolean>(IPC_CHANNELS.AUTH_DELETE_USER, { id }),
   },
 
   students: {
@@ -77,6 +96,100 @@ const api = {
       invoke<any[]>(IPC_CHANNELS.STUDENTS_SEARCH_NAME, { query }),
     getAttendanceHistory: (studentId: number) =>
       invoke<any[]>('students:attendanceHistory', { studentId }),
+    timeline: (studentId: number) =>
+      invoke<TimelineEvent[]>(IPC_CHANNELS.STUDENTS_TIMELINE, { studentId }),
+  },
+
+  guardians: {
+    list: (opts?: { search?: string; limit?: number; offset?: number }) =>
+      invoke<{ items: Guardian[]; total: number }>(IPC_CHANNELS.GUARDIANS_LIST, opts),
+    getById: (id: number) =>
+      invoke<Guardian | null>(IPC_CHANNELS.GUARDIANS_GET, { id }),
+    create: (data: { fullName: string; phone?: string | null; whatsappPhone?: string | null; email?: string | null; address?: string | null; notes?: string | null }) =>
+      invoke<Guardian>(IPC_CHANNELS.GUARDIANS_CREATE, data),
+    update: (id: number, data: Partial<{ fullName: string; phone: string | null; whatsappPhone: string | null; email: string | null; address: string | null; notes: string | null }>) =>
+      invoke<Guardian>(IPC_CHANNELS.GUARDIANS_UPDATE, { id, ...data }),
+    delete: (id: number) =>
+      invoke<boolean>(IPC_CHANNELS.GUARDIANS_DELETE, { id }),
+    familySummary: (guardianId: number) =>
+      invoke<FamilySummary>(IPC_CHANNELS.GUARDIANS_FAMILY_SUMMARY, { guardianId }),
+    linkStudent: (data: { studentId: number; guardianId: number; relationship?: string; isPrimaryContact?: boolean; isEmergencyContact?: boolean }) =>
+      invoke<StudentGuardianLink>('guardians:linkStudent', data),
+    unlinkStudent: (studentId: number, guardianId: number) =>
+      invoke<boolean>('guardians:unlinkStudent', { studentId, guardianId }),
+    forStudent: (studentId: number) =>
+      invoke<Array<{ link: StudentGuardianLink; guardian: Guardian }>>('guardians:forStudent', { studentId }),
+  },
+
+  cards: {
+    getByStudent: (studentId: number) =>
+      invoke<{ cards: StudentCardInfo[]; activeCard: StudentCardInfo | null }>(IPC_CHANNELS.CARDS_GET_BY_STUDENT, { studentId }),
+    issue: (studentId: number, opts?: { expiresAt?: string; notes?: string }) =>
+      invoke<StudentCardInfo>(IPC_CHANNELS.CARDS_ISSUE, { studentId, ...opts }),
+    markLost: (cardId: number, notes?: string) =>
+      invoke<StudentCardInfo>(IPC_CHANNELS.CARDS_MARK_LOST, { cardId, notes }),
+    replace: (oldCardId: number, opts?: { reason?: string; expiresAt?: string }) =>
+      invoke<StudentCardInfo>(IPC_CHANNELS.CARDS_REPLACE, { oldCardId, ...opts }),
+    disable: (cardId: number, notes?: string) =>
+      invoke<StudentCardInfo>(IPC_CHANNELS.CARDS_DISABLE, { cardId, notes }),
+    resolveToken: (token: string) =>
+      invoke<any>(IPC_CHANNELS.CARDS_RESOLVE_TOKEN, { token }),
+  },
+
+  documents: {
+    list: (studentId: number) =>
+      invoke<StudentDocument[]>(IPC_CHANNELS.DOCUMENTS_LIST, { studentId }),
+    upload: (studentId: number, documentType: DocumentType, sourceFilePath?: string, customName?: string) =>
+      invoke<StudentDocument | null>(IPC_CHANNELS.DOCUMENTS_UPLOAD, { studentId, documentType, sourceFilePath, customName }),
+    delete: (documentId: number) =>
+      invoke<boolean>(IPC_CHANNELS.DOCUMENTS_DELETE, { documentId }),
+    getUrl: (documentId: number) =>
+      invoke<{ filePath: string }>(IPC_CHANNELS.DOCUMENTS_GET_URL, { documentId }),
+  },
+
+  whatsapp: {
+    getTemplates: () =>
+      invoke<WhatsAppTemplate[]>(IPC_CHANNELS.WHATSAPP_GET_TEMPLATES),
+    updateTemplate: (id: number, data: Partial<Pick<WhatsAppTemplate, 'bodyAr' | 'bodyFr' | 'bodyEn' | 'nameAr' | 'nameFr' | 'nameEn' | 'isActive'>>) =>
+      invoke<WhatsAppTemplate>(IPC_CHANNELS.WHATSAPP_UPDATE_TEMPLATE, { id, ...data }),
+    open: (phone: string, templateKey: string, params?: Record<string, string>, lang?: 'ar' | 'fr' | 'en') =>
+      invoke<string>(IPC_CHANNELS.WHATSAPP_OPEN, { phone, templateKey, params, lang }),
+    normalizePhone: (phone: string) =>
+      invoke<{ normalized: string }>('whatsapp:normalizePhone', { phone }),
+  },
+
+  import: {
+    preview: (filePath?: string) =>
+      invoke<{ fileName: string; headers: string[]; sampleRows: Record<string, string>[]; totalRowsEstimate: number; filePath: string } | null>(
+        IPC_CHANNELS.IMPORT_PREVIEW,
+        filePath ? { filePath } : undefined
+      ),
+    execute: (filePath: string, mapping: any, options?: { skipHeader?: boolean; defaultGender?: 'male' | 'female'; createCards?: boolean; autoLinkGroups?: boolean }) =>
+      invoke<{ importedCount: number; skippedCount: number; duplicateCount: number; errorCount: number; errors: Array<{ row: number; error: string }> }>(
+        IPC_CHANNELS.IMPORT_EXECUTE,
+        { filePath, mapping, options }
+      ),
+  },
+
+  diagnostics: {
+    run: () =>
+      invoke<DiagnosticsReport>(IPC_CHANNELS.DIAGNOSTICS_RUN),
+    exportSupportPackage: (destinationPath?: string) =>
+      invoke<{ canceled: boolean; zipPath?: string }>(IPC_CHANNELS.DIAGNOSTICS_EXPORT_SUPPORT_PACKAGE, { destinationPath }),
+  },
+
+  search: {
+    global: (query: string) =>
+      invoke<GlobalSearchResult>(IPC_CHANNELS.SEARCH_GLOBAL, { query }),
+  },
+
+  notifications: {
+    list: () =>
+      invoke<Array<{ id: string; type: string; title: string; message: string; severity: 'info' | 'warning' | 'critical'; timestamp: string; actionLink?: string }>>(
+        IPC_CHANNELS.NOTIFICATIONS_LIST
+      ),
+    dismiss: (id: string) =>
+      invoke<boolean>(IPC_CHANNELS.NOTIFICATIONS_DISMISS, { id }),
   },
 
   teachers: {
@@ -93,9 +206,9 @@ const api = {
   courses: {
     list: (opts?: { status?: string }) =>
       invoke<Course[]>(IPC_CHANNELS.COURSES_LIST, opts),
-    create: (data: { nameAr: string; nameFr: string; nameEn?: string; defaultPrice: number; descriptionAr?: string | null; descriptionFr?: string | null }) =>
+    create: (data: { nameAr: string; nameFr: string; nameEn?: string; defaultPrice: number; descriptionAr?: string | null; descriptionFr?: string | null; billingModel?: string }) =>
       invoke<Course>(IPC_CHANNELS.COURSES_CREATE, data),
-    update: (id: number, data: Partial<{ nameAr: string; nameFr: string; defaultPrice: number; status: string }>) =>
+    update: (id: number, data: Partial<{ nameAr: string; nameFr: string; defaultPrice: number; status: string; billingModel?: string }>) =>
       invoke<Course>(IPC_CHANNELS.COURSES_UPDATE, { id, ...data }),
     delete: (id: number) =>
       invoke<boolean>(IPC_CHANNELS.COURSES_DELETE, { id }),
@@ -219,7 +332,6 @@ const api = {
       invoke<any>('payments:topUp', data),
     deductSession: (data: { studentId: number; enrollmentId: number; sessionId: number; sessionDate: string; sessionPrice: number }) =>
       invoke<{ deducted: boolean; newBalance: number; wasInDebt: boolean }>('payments:deductSession', data),
-    // transfer always moves 100% of remaining balance — no amount param
     transfer: (data: { fromEnrollmentId: number; toEnrollmentId: number; studentId: number }) =>
       invoke<{ transferred: number; newFromBalance: number; newToBalance: number }>('payments:transfer', data),
     refund: (data: { enrollmentId: number; studentId: number; notes?: string }) =>
@@ -267,6 +379,7 @@ const api = {
       academicYear: string; currency: string; defaultLanguage: 'ar' | 'fr' | 'en'
       backupDirectory: string | null; automaticBackupEnabled: boolean; backupsToRetain: number
       receiptPrinterName: string | null; receiptPaperWidth: string; autoPrintReceipt: boolean; showPrintDialog: boolean
+      primaryColor?: string | null; secondaryColor?: string | null; logoPath?: string | null; schoolLogoPath?: string | null; headerSubtitle?: string | null; schoolType?: string | null
     }>) => invoke<SchoolSettings>(IPC_CHANNELS.SETTINGS_UPDATE, data),
     getAdmin: () =>
       invoke<{ id: number; username: string; fullName: string; role: string; preferredLanguage: string; photoPath: string | null }>(IPC_CHANNELS.SETTINGS_GET_ADMIN),

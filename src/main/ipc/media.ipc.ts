@@ -1,4 +1,4 @@
-import { ipcMain, app, dialog, nativeImage } from 'electron'
+import { ipcMain, app, dialog, nativeImage, BrowserWindow } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { z } from 'zod'
@@ -84,13 +84,16 @@ export function registerMediaHandlers() {
   ipcMain.handle(IPC_CHANNELS.MEDIA_SELECT_IMAGE, async (_, input: unknown) => {
     try {
       const { type } = SelectProfileImageSchema.parse(input)
-      const parentWindow = require('electron').BrowserWindow.getFocusedWindow()
-
-      const result = await dialog.showOpenDialog(parentWindow, {
+      const parentWindow = BrowserWindow.getFocusedWindow()
+      const dialogOptions = {
         title: 'Select Profile Image',
         filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
-        properties: ['openFile'],
-      })
+        properties: ['openFile' as const],
+      }
+
+      const result = parentWindow
+        ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions)
 
       if (result.canceled || result.filePaths.length === 0) {
         return { success: false, data: null, error: 'Selection cancelled' }

@@ -1,26 +1,53 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import os from 'node:os'
 import path from 'node:path'
 import log from 'electron-log'
-import { initializeDatabase } from './database/connection'
+import { initializeDatabase, closeDatabase } from './database/connection'
 import { runMigrations } from './database/migrator'
 import { registerAllIpcHandlers } from './ipc/index'
 import { createMainWindow } from './windows/mainWindow'
+import { reconcilePastSessionsAttendance } from './services/attendance.service'
+import { runDailyAutoBackup } from './services/backup.service'
+
+import fs from 'node:fs'
+import { USER_DATA_DIR_NAME, USER_DATA_DEV_DIR_NAME } from '../shared/constants/index'
 
 log.initialize({ preload: true })
 log.transports.file.level = 'info'
 log.transports.console.level = process.env.NODE_ENV === 'development' ? 'debug' : 'warn'
 
-// Use a separate development userData path so development data never reuses production data.
-if (process.env.NODE_ENV !== 'production') {
-  const devDataDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Edupilot-DZ-Dev')
-  app.setPath('userData', devDataDir)
+// Explicitly isolate Edupilot 2 Commercial user data from Edupilot 1.0.0
+const baseDataDir = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
+const appDataDir = path.join(
+  baseDataDir,
+  process.env.NODE_ENV !== 'production' ? USER_DATA_DEV_DIR_NAME : USER_DATA_DIR_NAME
+)
+app.setPath('userData', appDataDir)
+
+// Ensure storage subdirectories exist
+const requiredDirs = [
+  path.join(appDataDir, 'database'),
+  path.join(appDataDir, 'media', 'students'),
+  path.join(appDataDir, 'media', 'teachers'),
+  path.join(appDataDir, 'media', 'administrators'),
+  path.join(appDataDir, 'media', 'guardians'),
+  path.join(appDataDir, 'media', 'school'),
+  path.join(appDataDir, 'media', 'documents'),
+  path.join(appDataDir, 'backups'),
+  path.join(appDataDir, 'logs'),
+  path.join(appDataDir, 'config'),
+  path.join(appDataDir, 'exports'),
+]
+for (const dir of requiredDirs) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
 }
 
-// Single instance lock
-const gotLock = app.requestSingleInstanceLock()
+// Single instance lock isolated to Edupilot 2 Commercial
+const gotLock = app.requestSingleInstanceLock({ key: 'edupilot-commercial-v2' } as any)
 if (!gotLock) {
-  log.warn('Another instance is already running — quitting')
+  log.warn('Another instance of Edupilot 2 Commercial is already running — quitting')
   app.quit()
 }
 
@@ -71,7 +98,6 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   log.info('App quitting — closing database')
   try {
-    const { closeDatabase } = require('./database/connection')
     closeDatabase()
   } catch { /* ignore */ }
 })
@@ -79,7 +105,7 @@ app.on('before-quit', () => {
 async function bootstrap(): Promise<void> {
   await app.whenReady()
 
-  log.info(`Edupilot DZ v${app.getVersion()} starting...`)
+  log.info(`Edupilot 2 Commercial v${app.getVersion()} starting...`)
   log.info(`Electron: ${process.versions.electron}, Node: ${process.versions.node}`)
   log.info(`userData: ${app.getPath('userData')}`)
 
@@ -113,7 +139,6 @@ async function bootstrap(): Promise<void> {
 
     // 5. Run offline attendance reconciliation on startup (Requirement 16)
     try {
-      const { reconcilePastSessionsAttendance } = await import('./services/attendance.service')
       await reconcilePastSessionsAttendance()
       log.info('Offline attendance reconciliation completed on startup')
     } catch (e) {
@@ -122,7 +147,6 @@ async function bootstrap(): Promise<void> {
 
     // 6. Trigger daily auto-backup asynchronously (Requirement 53)
     try {
-      const { runDailyAutoBackup } = await import('./services/backup.service')
       runDailyAutoBackup().catch(e => log.warn('Auto backup background error:', e))
     } catch (e) {
       log.warn('Auto backup init error:', e)
@@ -132,7 +156,6 @@ async function bootstrap(): Promise<void> {
   } catch (err) {
     log.error('Bootstrap failed:', err)
     // Show error dialog before quitting
-    const { dialog } = require('electron')
     dialog.showErrorBox(
       'Startup Error',
       `Failed to initialize the application:\n\n${err instanceof Error ? err.message : String(err)}\n\nPlease check the logs.`

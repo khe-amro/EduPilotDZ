@@ -309,3 +309,159 @@ export async function regenerateQRToken(id: number): Promise<string> {
   log.info(`QR token regenerated for student ${id}`)
   return newToken
 }
+
+// ─── Chronological Student Timeline ──────────────────────────────────────────
+
+export async function getStudentTimeline(studentId: number): Promise<any[]> {
+  const sqlite = getSqlite()
+  const events: any[] = []
+
+  // 1. Attendance events
+  try {
+    const attRows = sqlite.prepare(`
+      SELECT ar.id, ar.attendance_status, ar.marked_at, ar.created_at,
+             s.session_date, s.start_time, s.end_time,
+             g.name as group_name, c.name_ar as course_name_ar, c.name_fr as course_name_fr
+      FROM attendance_records ar
+      JOIN attendance_sessions s ON ar.session_id = s.id
+      JOIN groups g ON s.group_id = g.id
+      JOIN courses c ON g.course_id = c.id
+      WHERE ar.student_id = ?
+      ORDER BY s.session_date DESC, ar.marked_at DESC
+      LIMIT 15
+    `).all(studentId) as any[]
+
+    for (const a of attRows) {
+      const courseName = a.course_name_ar || a.course_name_fr || a.group_name
+      const statusLabel = a.attendance_status === 'present' ? 'حاضر (Present)' : a.attendance_status === 'late' ? 'متأخر (Late)' : 'غائب (Absent)'
+      events.push({
+        id: `att_${a.id}`,
+        type: 'attendance',
+        title: `حضور: ${courseName}`,
+        description: `الحالة: ${statusLabel} - التاريخ: ${a.session_date} ${a.start_time || ''}`,
+        date: a.marked_at || a.session_date || a.created_at,
+        metadata: { status: a.attendance_status, groupName: a.group_name },
+      })
+    }
+  } catch {}
+
+  // 2. Payment events
+  try {
+    const payRows = sqlite.prepare(`
+      SELECT p.id, p.amount, p.payment_method, p.payment_date, p.created_at, p.receipt_number,
+             g.name as group_name, c.name_ar as course_name_ar
+      FROM payments p
+      JOIN enrollments e ON p.enrollment_id = e.id
+      JOIN groups g ON e.group_id = g.id
+      JOIN courses c ON g.course_id = c.id
+      WHERE p.student_id = ? AND p.status = 'completed'
+      ORDER BY p.payment_date DESC
+      LIMIT 10
+    `).all(studentId) as any[]
+
+    for (const p of payRows) {
+      events.push({
+        id: `pay_${p.id}`,
+        type: 'payment',
+        title: `دفعة مالية: ${p.amount} د.ج`,
+        description: `الفوج: ${p.group_name} (${p.course_name_ar || ''}) - الوصل: ${p.receipt_number || 'N/A'} - الطريقة: ${p.payment_method}`,
+        date: p.payment_date || p.created_at,
+        metadata: { amount: p.amount, receiptNumber: p.receipt_number },
+      })
+    }
+  } catch {}
+
+  // 3. Card lifecycle events
+  try {
+    const cardRows = sqlite.prepare(`
+      SELECT id, status, issued_at, expires_at, notes, created_at
+      FROM student_cards
+      WHERE student_id = ?
+      ORDER BY created_at DESC
+      LIMIT 5
+    `).all(studentId) as any[]
+
+    for (const c of cardRows) {
+      events.push({
+        id: `card_${c.id}`,
+        type: 'card',
+        title: `بطاقة الطالب: ${c.status}`,
+        description: `تاريخ الإصدار: ${c.issued_at || c.created_at?.slice(0, 10)} ${c.notes ? '• ' + c.notes : ''}`,
+        date: c.issued_at || c.created_at,
+        metadata: { status: c.status },
+      })
+    }
+  } catch {}
+
+  // 4. Documents uploaded
+  try {
+    const docRows = sqlite.prepare(`
+      SELECT id, file_name, document_type, created_at
+      FROM student_documents
+      WHERE student_id = ?
+      ORDER BY created_at DESC
+      LIMIT 5
+    `).all(studentId) as any[]
+
+    for (const d of docRows) {
+      events.push({
+        id: `doc_${d.id}`,
+        type: 'document',
+        title: `مستند: ${d.file_name}`,
+        description: `النوع: ${d.document_type}`,
+        date: d.created_at,
+        metadata: { docType: d.document_type },
+      })
+    }
+  } catch {}
+
+  // 5. Notes recorded
+  try {
+    const noteRows = sqlite.prepare(`
+      SELECT n.id, n.note_text, n.created_at, a.full_name as author
+      FROM student_notes n
+      LEFT JOIN administrators a ON n.created_by = a.id
+      WHERE n.student_id = ?
+      ORDER BY n.created_at DESC
+      LIMIT 5
+    `).all(studentId) as any[]
+
+    for (const n of noteRows) {
+      events.push({
+        id: `note_${n.id}`,
+        type: 'note',
+        title: `ملاحظة إدارية`,
+        description: `${n.note_text} (بواسطة ${n.author || 'الإدارة'})`,
+        date: n.created_at,
+        metadata: { author: n.author },
+      })
+    }
+  } catch {}
+
+  // 6. Enrollments
+  try {
+    const enrRows = sqlite.prepare(`
+      SELECT e.id, e.enrollment_date, e.agreed_price, e.status, g.name as group_name, c.name_ar as course_name_ar
+      FROM enrollments e
+      JOIN groups g ON e.group_id = g.id
+      JOIN courses c ON g.course_id = c.id
+      WHERE e.student_id = ?
+      ORDER BY e.enrollment_date DESC
+    `).all(studentId) as any[]
+
+    for (const e of enrRows) {
+      events.push({
+        id: `enr_${e.id}`,
+        type: 'enrollment',
+        title: `تسجيل في فوج: ${e.group_name}`,
+        description: `المادة: ${e.course_name_ar || ''} - السعر المتفق: ${e.agreed_price} د.ج - الحالة: ${e.status}`,
+        date: e.enrollment_date,
+        metadata: { groupName: e.group_name, agreedPrice: e.agreed_price },
+      })
+    }
+  } catch {}
+
+  // Sort chronologically descending
+  events.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
+  return events
+}

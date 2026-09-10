@@ -1,11 +1,11 @@
 {
-  "name": "edupilot-dz",
-  "productName": "Edupilot DZ",
+  "name": "edupilot-commercial",
+  "productName": "Edupilot 2 Commercial",
   "private": true,
-  "version": "1.0.0",
-  "description": "Système de gestion scolaire hors ligne — إدارة المدرسة بدون إنترنت",
+  "version": "2.0.0",
+  "description": "Edupilot 2.0 Commercial — Système de gestion scolaire commercial hors ligne",
   "author": {
-    "name": "Edupilot DZ"
+    "name": "Edupilot"
   },
   "main": "out/main/main.js",
   "type": "module",

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 
 @theme {
@@ -20,8 +20,9 @@
   --color-success: #16A34A;
   --color-warning: #F59E0B;
   --color-error: #DC2626;
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-arabic: 'Amiri', 'Inter', system-ui, sans-serif;
+  --font-sans: 'Playfair Display', Georgia, serif;
+  --font-arabic: 'Amiri', serif;
+  --font-latin: 'Playfair Display', Georgia, serif;
   --radius: 10px;
 }
 
@@ -30,18 +31,55 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Playfair Display', Georgia, serif;
   background-color: #F8FAFC;
   color: #0F172A;
   font-size: 14px;
   line-height: 1.5;
 }
 
+/* Latin typography for French and English */
+[lang="fr"],
+[lang="en"],
+[dir="ltr"],
+[lang="fr"] body,
+[lang="en"] body,
+[dir="ltr"] body {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+[lang="fr"] input,
+[lang="fr"] select,
+[lang="fr"] textarea,
+[lang="fr"] button,
+[lang="en"] input,
+[lang="en"] select,
+[lang="en"] textarea,
+[lang="en"] button,
+[dir="ltr"] input,
+[dir="ltr"] select,
+[dir="ltr"] textarea,
+[dir="ltr"] button {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+/* Arabic body strictly uses Amiri as primary font across the entire system */
 [lang="ar"],
 [dir="rtl"],
 [lang="ar"] body,
 [dir="rtl"] body {
-  font-family: 'Amiri', 'Inter', system-ui, sans-serif;
+  font-family: 'Amiri', serif;
+}
+
+[lang="ar"] input,
+[lang="ar"] select,
+[lang="ar"] textarea,
+[lang="ar"] button,
+[dir="rtl"] input,
+[dir="rtl"] select,
+[dir="rtl"] textarea,
+[dir="rtl"] button {
+  font-family: 'Amiri', serif;
 }
 
 ::-webkit-scrollbar {

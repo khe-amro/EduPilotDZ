@@ -1,9 +1,13 @@
-import { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Printer, Download, Eye } from 'lucide-react'
+import {
+  ArrowLeft, Printer, Download, CreditCard, Receipt, Layers,
+  RefreshCw, AlertCircle, CheckCircle2, ShieldCheck, Phone, MapPin
+} from 'lucide-react'
 import QRCode from 'qrcode'
-import type { Student, Enrollment } from '@shared/types/index'
+import type { Student, Enrollment, StudentCardInfo } from '../../shared/types/index'
+import appIcon from '../assets/icon.png'
 
 interface SchoolInfo {
   schoolNameAr: string
@@ -11,36 +15,48 @@ interface SchoolInfo {
   academicYear: string
   phone?: string | null
   address?: string | null
+  logoPath?: string | null
+  logoUrl?: string | null
 }
 
 export default function StudentCard() {
   const { t } = useTranslation()
   const { id } = useParams()
   const navigate = useNavigate()
+
   const [student, setStudent] = useState<Student | null>(null)
-  const [school, setSchool] = useState<SchoolInfo>({ schoolNameAr: '', schoolNameFr: 'EDUPILOT DZ', academicYear: '2025-2026' })
+  const [school, setSchool] = useState<SchoolInfo>({
+    schoolNameAr: 'مدرسة التميز الخاصة',
+    schoolNameFr: 'ÉCOLE PRIVÉE EXCELLENCE',
+    academicYear: '2025-2026',
+    phone: '0550 00 00 00',
+    address: 'Alger, Algérie',
+  })
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [enrollments, setEnrollments] = useState<Enrollment[]>([])
+  const [activeCard, setActiveCard] = useState<StudentCardInfo | null>(null)
+  const [cardHistory, setCardHistory] = useState<StudentCardInfo[]>([])
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [printing, setPrinting] = useState(false)
-  const [showPreview, setShowPreview] = useState(false)
+  const [cardMode, setCardMode] = useState<'cr80' | 'thermal' | 'a4_batch'>('cr80')
+  const [flipCard, setFlipCard] = useState(false)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
       try {
         const studentId = Number(id)
-        const [studentRes, settingsRes, enrollRes] = await Promise.all([
+        const [studentRes, settingsRes, enrollRes, cardsRes] = await Promise.all([
           window.schoolApp.students.getById(studentId),
           window.schoolApp.settings.get(),
           window.schoolApp.enrollments.byStudent(studentId),
+          window.schoolApp.cards.getByStudent(studentId),
         ])
 
         if (studentRes.success && studentRes.data) {
           const s = studentRes.data
           setStudent(s)
-
-          // Load photo
           if (s.photoPath) {
             try {
               const photoRes = await window.schoolApp.media.getImageUrl(s.photoPath)
@@ -50,17 +66,33 @@ export default function StudentCard() {
         }
 
         if (settingsRes.success && settingsRes.data) {
+          const sett = settingsRes.data as any
+          let logoDataUrl: string | null = null
+          if (sett.logoPath) {
+            try {
+              const lRes = await window.schoolApp.media.getImageUrl(sett.logoPath)
+              if (lRes.success && lRes.data?.url) logoDataUrl = lRes.data.url
+            } catch {}
+          }
+
           setSchool({
-            schoolNameAr: settingsRes.data.schoolNameAr ?? '',
-            schoolNameFr: settingsRes.data.schoolNameFr ?? 'EDUPILOT DZ',
-            academicYear: settingsRes.data.academicYear ?? '2025-2026',
-            phone: settingsRes.data.phone,
-            address: settingsRes.data.address,
+            schoolNameAr: sett.schoolNameAr || 'مدرسة المستقبل',
+            schoolNameFr: sett.schoolNameFr || 'ÉCOLE DU FUTUR',
+            academicYear: sett.academicYear || '2025-2026',
+            phone: sett.phone,
+            address: sett.address,
+            logoPath: sett.logoPath,
+            logoUrl: logoDataUrl,
           })
         }
 
         if (enrollRes.success && enrollRes.data) {
           setEnrollments(enrollRes.data)
+        }
+
+        if (cardsRes.success && cardsRes.data) {
+          setActiveCard(cardsRes.data.activeCard)
+          setCardHistory(cardsRes.data.cards)
         }
       } finally {
         setLoading(false)
@@ -74,39 +106,25 @@ export default function StudentCard() {
   const initials = student ? (student.firstNameAr.charAt(0) + student.lastNameAr.charAt(0)) : ''
 
   const activeEnrollments = useMemo(() => {
-    const active = enrollments.filter(e => e.status === 'active')
+    const active = enrollments.filter((e) => e.status === 'active')
     return active.length > 0 ? active : enrollments
   }, [enrollments])
 
-  // Generate QR Code with clean structured payload
+  // CRITICAL SECURITY RULE: Encode ONLY the secure token EDP2:... in the QR code!
+  const secureToken = activeCard?.cardToken || student?.qrToken || `EDP2:${student?.id || '000'}`
+
   useEffect(() => {
-    if (student?.qrToken) {
-      const classesSummary = activeEnrollments
-        .map(e => `${e.courseName || 'Cours'}${e.groupName ? ` (${e.groupName})` : ''}${e.teacherName ? ` - ${e.teacherName}` : ''}`)
-
-      const lines = [
-        school.schoolNameFr || 'EDUPILOT DZ',
-        `Matricule: ${student.studentNumber}`,
-        `Nom: ${fullNameAr}`,
-        `Nom FR: ${fullNameFr}`,
-        student.phone ? `Tél: ${student.phone}` : null,
-        classesSummary.length > 0 ? `Classes: ${classesSummary.join(', ')}` : null,
-        `ID: ${student.qrToken}`,
-      ].filter(Boolean)
-
-      const qrPayload = lines.join('\n')
-
-      QRCode.toDataURL(qrPayload, {
+    if (secureToken) {
+      QRCode.toDataURL(secureToken, {
         width: 320,
         margin: 1,
         color: { dark: '#000000', light: '#FFFFFF' },
-        errorCorrectionLevel: 'M',
+        errorCorrectionLevel: 'H',
       })
         .then((url) => setQrDataUrl(url))
         .catch((err) => console.error('QR generation error:', err))
     }
-  }, [student, activeEnrollments, school, fullNameAr, fullNameFr])
-
+  }, [secureToken])
 
   const handlePrint = async () => {
     setPrinting(true)
@@ -121,188 +139,336 @@ export default function StudentCard() {
     setPrinting(true)
     try {
       await window.schoolApp.app.printToPdf({
-        pageSize: 'A4' as any,
+        pageSize: cardMode === 'thermal' ? 'Letter' : 'A4',
         marginsType: 0,
-        filename: `Ticket-${student?.studentNumber || 'etudiant'}.pdf`,
+        filename: `Carte-${student?.studentNumber || 'etudiant'}.pdf`,
       })
     } finally {
       setPrinting(false)
     }
   }
 
+  const handleIssueNewCard = async () => {
+    if (!student) return
+    try {
+      const res = await window.schoolApp.cards.issue(student.id, { notes: 'Issued from student card manager' })
+      if (res.success && res.data) {
+        setActiveCard(res.data)
+        setCardHistory((prev) => [res.data, ...prev])
+        setActionMessage('تم إصدار بطاقة جديدة بنجاح وتحديث رمز QR المشفر')
+        setTimeout(() => setActionMessage(null), 4000)
+      }
+    } catch {}
+  }
+
+  const handleMarkLost = async () => {
+    if (!activeCard) return
+    const confirmed = window.confirm('هل أنت متأكد من الإبلاغ عن فقدان هذه البطاقة؟ سيتم إيقافها فوراً لمنع الاستخدام.')
+    if (!confirmed) return
+    try {
+      const res = await window.schoolApp.cards.markLost(activeCard.id, 'Reported lost by student/guardian')
+      if (res.success && res.data) {
+        setActiveCard(null)
+        setCardHistory((prev) => prev.map((c) => (c.id === activeCard.id ? res.data : c)))
+        setActionMessage('تم إلغاء تفعيل البطاقة المفقودة بنجاح')
+        setTimeout(() => setActionMessage(null), 4000)
+      }
+    } catch {}
+  }
+
   if (loading) {
     return (
-      <div className="flex justify-center py-20">
-        <div className="w-6 h-6 border-2 border-[#2563EB] border-t-transparent rounded-full animate-spin" />
+      <div className="flex justify-center py-24">
+        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   if (!student) {
-    return <div className="text-center py-20 text-slate-400">{t('errors.STUDENT_NOT_FOUND')}</div>
+    return (
+      <div className="text-center py-20 text-slate-400">
+        <p className="text-sm font-semibold">الطالب غير موجود</p>
+      </div>
+    )
   }
 
-  /* ── 80mm Thermal Ticket Component ── */
-  const TicketContent = () => (
+  /* ──────────────────────────────────────────────────────────────────────────
+     1. CR80 Standard Plastic Card Component (Front & Back)
+     Exact Dimensions: 85.6mm x 54mm (ratio ~ 1.585)
+     Palette: Deep Navy #0A192F, Accent Teal #0D9488, Gold #F59E0B
+  ────────────────────────────────────────────────────────────────────────── */
+  const Cr80CardFront = () => (
     <div
-      className="student-ticket-content"
+      className="cr80-card-front relative rounded-2xl overflow-hidden shadow-2xl border border-slate-700/80 text-white select-none shrink-0"
+      style={{
+        width: '85.6mm',
+        height: '54mm',
+        backgroundColor: '#0A192F',
+        boxSizing: 'border-box',
+        padding: '3.5mm 4mm',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        position: 'relative',
+      }}
+    >
+      {/* Decorative concentric geometry in top-right */}
+      <div
+        className="absolute -top-12 -right-12 w-32 h-32 rounded-full border-2 border-teal-500/20 pointer-events-none"
+        style={{ background: 'radial-gradient(circle, rgba(13,148,136,0.15) 0%, rgba(10,25,47,0) 70%)' }}
+      />
+      <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full border border-teal-400/25 pointer-events-none" />
+
+      {/* Top Bar: School Logo & Identity */}
+      <div className="flex items-center justify-between z-10">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-white p-0.5 shadow-sm flex items-center justify-center shrink-0">
+            <img src={school.logoUrl || appIcon} alt="School Logo" className="w-full h-full object-contain" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-[9.5pt] font-black leading-tight truncate tracking-wide text-white" dir="rtl">
+              {school.schoolNameAr}
+            </h3>
+            <p className="text-[5.5pt] font-bold uppercase tracking-wider text-teal-400 truncate">
+              {school.schoolNameFr}
+            </p>
+          </div>
+        </div>
+
+        <div className="text-end shrink-0 ps-1">
+          <span className="inline-block px-1.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/40 text-[5.5pt] font-mono text-teal-300 font-bold">
+            {school.academicYear}
+          </span>
+          <p className="text-[5pt] text-slate-400 font-medium tracking-tight mt-0.5">بطاقة الطالب • STUDENT</p>
+        </div>
+      </div>
+
+      {/* Center Body: Student Photo + Info + Secure QR */}
+      <div className="flex items-center justify-between gap-2.5 z-10 my-auto">
+        {/* Photo Container */}
+        <div className="relative shrink-0">
+          <div className="w-16 h-20 rounded-xl overflow-hidden border-2 border-teal-400 shadow-md bg-slate-800 flex items-center justify-center">
+            {photoUrl ? (
+              <img src={photoUrl} alt={fullNameFr} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-base font-bold text-teal-300">{initials}</span>
+            )}
+          </div>
+          <div className="absolute -bottom-1 -right-1 px-1 py-0.2 bg-teal-600 rounded text-[4.5pt] font-bold uppercase text-white shadow-xs">
+            {student.gender === 'male' ? 'M' : 'F'}
+          </div>
+        </div>
+
+        {/* Student Data */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <h2 className="text-[11pt] font-bold text-white leading-tight truncate" dir="rtl">
+            {fullNameAr}
+          </h2>
+          <p className="text-[7pt] font-semibold text-slate-300 leading-tight truncate mt-0.5">
+            {fullNameFr}
+          </p>
+
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="bg-slate-800/90 border border-slate-700 px-2 py-0.5 rounded-md">
+              <span className="text-[5pt] text-slate-400 block font-medium">MATRICULE</span>
+              <span className="text-[7.5pt] font-mono font-bold text-teal-300 tracking-wider">
+                {student.studentNumber}
+              </span>
+            </div>
+          </div>
+
+          {/* Active groups tags */}
+          <div className="mt-1 flex flex-wrap gap-1 max-h-5 overflow-hidden">
+            {activeEnrollments.slice(0, 2).map((en, idx) => (
+              <span
+                key={idx}
+                className="text-[5pt] font-medium bg-white/10 px-1 py-0.2 rounded text-slate-300 truncate max-w-[28mm]"
+              >
+                {en.courseName || en.groupName}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* High-density QR Code (ENCODES ONLY EDP2:TOKEN) */}
+        <div className="flex flex-col items-center shrink-0">
+          <div className="w-16 h-16 p-1 bg-white rounded-xl shadow-md border border-teal-400/40 flex items-center justify-center">
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt="Secure Token QR" className="w-full h-full object-contain" />
+            ) : (
+              <div className="w-full h-full bg-slate-100 animate-pulse" />
+            )}
+          </div>
+          <span className="text-[4pt] font-mono text-slate-400 mt-0.5 uppercase tracking-tight">
+            SECURE TOKEN
+          </span>
+        </div>
+      </div>
+
+      {/* Bottom Footer: Security & Edupilot badge */}
+      <div className="flex items-center justify-between border-t border-slate-800/80 pt-1 text-[5pt] text-slate-400 z-10">
+        <span className="flex items-center gap-1 font-mono">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+          VERIFIED STUDENT ID
+        </span>
+        <span className="text-slate-500 font-semibold tracking-wide">
+          Powered by <strong className="text-slate-400">Edupilot 2.0</strong>
+        </span>
+      </div>
+    </div>
+  )
+
+  const Cr80CardBack = () => (
+    <div
+      className="cr80-card-back relative rounded-2xl overflow-hidden shadow-2xl border border-slate-700/80 text-white select-none shrink-0"
+      style={{
+        width: '85.6mm',
+        height: '54mm',
+        backgroundColor: '#071224',
+        boxSizing: 'border-box',
+        padding: '3.5mm 4mm',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+      }}
+    >
+      <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+        <span className="text-[6pt] font-bold text-teal-400">شروط الاستخدام • TERMS</span>
+        <span className="text-[5.5pt] text-slate-400">{school.schoolNameFr}</span>
+      </div>
+
+      <div className="text-[5pt] text-slate-300 space-y-1 my-auto leading-relaxed" dir="rtl">
+        <p>• هذه البطاقة شخصية وصالحة للعام الدراسي {school.academicYear} فقط.</p>
+        <p>• يجب إبراز البطاقة عند كل حضور لمسح رمز الحضور الذكي.</p>
+        <p>• في حالة ضياع البطاقة، يرجى التبليغ فوراً لدى الإدارة لإلغائها وإصدار بديل.</p>
+        <p>• إذا وجدت هذه البطاقة يرجى إعادتها إلى مقر المؤسسة المبين أدناه.</p>
+      </div>
+
+      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-2 flex items-center justify-between text-[5pt]">
+        <div className="space-y-0.5">
+          {school.phone && (
+            <div className="flex items-center gap-1 text-slate-300">
+              <Phone className="w-2.5 h-2.5 text-teal-400" />
+              <span>{school.phone}</span>
+            </div>
+          )}
+          {school.address && (
+            <div className="flex items-center gap-1 text-slate-400 truncate max-w-[50mm]">
+              <MapPin className="w-2.5 h-2.5 text-teal-400" />
+              <span className="truncate">{school.address}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="text-end border-s border-slate-800 ps-2">
+          <span className="text-[4.5pt] text-slate-500 block">توقيع الإدارة</span>
+          <div className="w-16 h-4 border-b border-dashed border-slate-600 mt-1" />
+        </div>
+      </div>
+
+      <div className="text-[4.5pt] text-center text-slate-500">
+        Edupilot Commercial • Offline Encrypted Security
+      </div>
+    </div>
+  )
+
+  /* ──────────────────────────────────────────────────────────────────────────
+     2. 80mm Thermal Receipt Ticket Component
+  ────────────────────────────────────────────────────────────────────────── */
+  const ThermalTicket = () => (
+    <div
+      className="thermal-ticket-card"
       style={{
         width: '80mm',
-        fontFamily: "'Courier New', Courier, monospace",
-        backgroundColor: '#ffffff',
+        backgroundColor: '#FFFFFF',
         color: '#000000',
-        padding: '6mm 5mm',
+        fontFamily: "'Courier New', Courier, monospace",
+        padding: '5mm',
         boxSizing: 'border-box',
         margin: '0 auto',
       }}
     >
-      {/* Header: School name */}
       <div style={{ textAlign: 'center', marginBottom: '3mm' }}>
-        <div style={{ fontSize: '11pt', fontWeight: 'bold', letterSpacing: '1px' }}>
-          {school.schoolNameFr || 'EDUPILOT DZ'}
-        </div>
-        {school.schoolNameAr && (
-          <div style={{ fontSize: '10pt', fontWeight: 'bold', direction: 'rtl', marginTop: '1mm' }}>
-            {school.schoolNameAr}
-          </div>
-        )}
-        <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
-        <div style={{ fontSize: '10pt', fontWeight: 'bold', letterSpacing: '2px', textTransform: 'uppercase' }}>
-          TICKET ÉTUDIANT
-        </div>
-        <div style={{ fontSize: '8pt', color: '#555' }}>Année scolaire: {school.academicYear}</div>
-        <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
+        <div style={{ fontSize: '11pt', fontWeight: 'bold' }}>{school.schoolNameFr}</div>
+        <div style={{ fontSize: '10pt', fontWeight: 'bold', direction: 'rtl', marginTop: '1mm' }}>{school.schoolNameAr}</div>
+        <div style={{ borderBottom: '1px dashed #000', margin: '2mm 0' }} />
+        <div style={{ fontSize: '9pt', fontWeight: 'bold', letterSpacing: '1px' }}>TICKET ÉTUDIANT (QR)</div>
+        <div style={{ fontSize: '7.5pt', color: '#555' }}>Année: {school.academicYear}</div>
+        <div style={{ borderBottom: '1px dashed #000', margin: '2mm 0' }} />
       </div>
 
-      {/* Photo / Initials */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '3mm' }}>
-        {photoUrl ? (
-          <img
-            src={photoUrl}
-            alt="Photo"
-            style={{
-              width: '22mm',
-              height: '22mm',
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '2px solid #000',
-            }}
-          />
-        ) : (
-          <div style={{
-            width: '22mm', height: '22mm', borderRadius: '50%',
-            border: '2px solid #000', display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            fontSize: '13pt', fontWeight: 'bold',
-          }}>
-            {initials}
-          </div>
-        )}
-      </div>
-
-      {/* Student Names */}
       <div style={{ textAlign: 'center', marginBottom: '2.5mm' }}>
         <div style={{ fontSize: '12pt', fontWeight: 'bold', direction: 'rtl' }}>{fullNameAr}</div>
-        <div style={{ fontSize: '9.5pt', color: '#222', marginTop: '1mm' }}>{fullNameFr}</div>
+        <div style={{ fontSize: '9pt', marginTop: '1mm' }}>{fullNameFr}</div>
+        <div style={{ fontSize: '9pt', fontWeight: 'bold', marginTop: '1mm', fontFamily: 'monospace' }}>
+          MATRICULE: {student.studentNumber}
+        </div>
       </div>
 
-      <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
+      <div style={{ borderBottom: '1px dashed #000', margin: '2mm 0' }} />
 
-      {/* Student Identity Details */}
-      <div style={{ fontSize: '8pt', lineHeight: '1.6' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 'bold' }}>N° Matricule:</span>
-          <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{student.studentNumber}</span>
-        </div>
-        {student.phone && (
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ fontWeight: 'bold' }}>Téléphone:</span>
-            <span>{student.phone}</span>
+      {/* Courses List */}
+      <div style={{ fontSize: '8pt', lineHeight: '1.5' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '1mm' }}>CLASSES INSCRITES:</div>
+        {activeEnrollments.map((en, idx) => (
+          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>• {en.courseName || en.groupName}</span>
+            <span>{en.teacherName || ''}</span>
           </div>
+        ))}
+      </div>
+
+      <div style={{ borderBottom: '1px dashed #000', margin: '2mm 0' }} />
+
+      {/* QR Code */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '2mm 0' }}>
+        {qrDataUrl && (
+          <img src={qrDataUrl} alt="QR" style={{ width: '40mm', height: '40mm', imageRendering: 'pixelated' }} />
         )}
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 'bold' }}>Statut:</span>
-          <span style={{ fontWeight: 'bold' }}>{student.status === 'active' ? 'ACTIF' : 'INACTIF'}</span>
+        <span style={{ fontSize: '6.5pt', color: '#555', marginTop: '1mm', fontFamily: 'monospace' }}>
+          {secureToken.slice(0, 18)}...
+        </span>
+      </div>
+
+      <div style={{ borderBottom: '1px dashed #000', margin: '2mm 0' }} />
+      <div style={{ textAlign: 'center', fontSize: '6.5pt', color: '#666' }}>
+        <div>Scannez ce QR code pour enregistrer la présence</div>
+        <div>Inscrit le: {student.registrationDate} • Edupilot 2.0</div>
+      </div>
+    </div>
+  )
+
+  /* ──────────────────────────────────────────────────────────────────────────
+     3. A4 Batch Printing Sheet (8 cards on 1 page)
+  ────────────────────────────────────────────────────────────────────────── */
+  const A4BatchSheet = () => (
+    <div
+      className="a4-batch-sheet grid grid-cols-2 gap-4 p-8 bg-white"
+      style={{ width: '210mm', minHeight: '297mm', boxSizing: 'border-box' }}
+    >
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="scale-95 origin-top-left">
+          <Cr80CardFront />
         </div>
-      </div>
-
-      <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
-
-      {/* Course & Group Enrollment Details with Teacher */}
-      <div style={{ fontSize: '8pt', lineHeight: '1.6' }}>
-        <div style={{ fontWeight: 'bold', textDecoration: 'underline', marginBottom: '1.5mm' }}>
-          CLASSES & ENSEIGNANTS:
-        </div>
-        {activeEnrollments.length > 0 ? (
-          activeEnrollments.map((en, idx) => (
-            <div key={en.id || idx} style={{ marginBottom: '2mm', paddingBottom: '1.5mm', borderBottom: idx < activeEnrollments.length - 1 ? '1px dotted #ccc' : 'none' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                <span>• Matière:</span>
-                <span style={{ direction: 'rtl' }}>{en.courseName || en.groupName || '—'}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#444' }}>  Groupe:</span>
-                <span>{en.groupName || `Groupe #${en.groupId}`}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#444' }}>  Enseignant:</span>
-                <span style={{ fontWeight: 'bold' }}>{en.teacherName || 'Non assigné'}</span>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div style={{ color: '#666', fontStyle: 'italic' }}>Aucune inscription active</div>
-        )}
-      </div>
-
-
-      <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
-
-      {/* Rich QR Code Section */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5mm', margin: '2mm 0' }}>
-        {qrDataUrl ? (
-          <img
-            src={qrDataUrl}
-            alt="QR Code"
-            style={{ width: '40mm', height: '40mm', display: 'block', imageRendering: 'pixelated' }}
-          />
-        ) : (
-          <div style={{ width: '40mm', height: '40mm', border: '1px dashed #999', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8pt', color: '#999' }}>
-            QR Code
-          </div>
-        )}
-        <div style={{ fontSize: '6.5pt', color: '#555', fontFamily: 'monospace', textAlign: 'center', wordBreak: 'break-all', maxWidth: '70mm' }}>
-          ID: {student.qrToken}
-        </div>
-      </div>
-
-      <div style={{ borderBottom: '1px dashed #000', margin: '2.5mm 0' }} />
-
-      {/* Footer */}
-      <div style={{ textAlign: 'center', fontSize: '6.5pt', color: '#666', lineHeight: '1.4' }}>
-        <div>Inscrit le: {student.registrationDate}</div>
-        <div>Scannez ce QR Code pour voir le profil & pointer la présence</div>
-      </div>
+      ))}
     </div>
   )
 
   return (
     <>
-      {/* Print-only ticket — centered on page */}
+      {/* Print Stylesheet */}
       <style>{`
         @media print {
           body * { visibility: hidden !important; }
-          .student-ticket-print,
-          .student-ticket-print * { visibility: visible !important; }
-          .student-ticket-print {
+          .printable-card-target,
+          .printable-card-target * { visibility: visible !important; }
+          .printable-card-target {
             position: absolute !important;
-            visibility: visible !important;
             left: 50% !important;
             top: 5mm !important;
             transform: translateX(-50%) !important;
             margin: 0 !important;
             padding: 0 !important;
-            width: 80mm !important;
           }
           @page {
             size: auto;
@@ -311,197 +477,197 @@ export default function StudentCard() {
         }
       `}</style>
 
-      {/* Hidden print area */}
-      <div className="student-ticket-print" style={{ position: 'fixed', left: '-9999px', top: 0, visibility: 'hidden' }}>
-        <TicketContent />
+      {/* Hidden container targeted by print dialog */}
+      <div className="printable-card-target" style={{ position: 'fixed', left: '-9999px', top: 0, visibility: 'hidden' }}>
+        {cardMode === 'cr80' && <Cr80CardFront />}
+        {cardMode === 'thermal' && <ThermalTicket />}
+        {cardMode === 'a4_batch' && <A4BatchSheet />}
       </div>
 
-      {/* Toolbar — hidden on print */}
-      <div className="no-print flex flex-wrap items-center gap-3 mb-6">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm transition-colors"
-        >
-          <ArrowLeft size={15} /> {t('common.back')}
-        </button>
-
-        <div className="ms-auto flex items-center gap-2">
+      <div className="p-6 max-w-5xl mx-auto space-y-6">
+        {/* Top Navigation Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <button
-            onClick={() => setShowPreview(true)}
-            className="flex items-center gap-2 border border-border bg-white text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"
           >
-            <Eye size={15} /> {t('common.preview') ?? 'Aperçu'}
+            <ArrowLeft className="w-4 h-4" />
+            العودة لملف الطالب
           </button>
-          <button
-            onClick={handleSavePDF}
-            disabled={printing}
-            className="flex items-center gap-2 border border-[#2563EB] text-[#2563EB] px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#EFF6FF] transition-colors disabled:opacity-50"
-          >
-            <Download size={15} /> PDF
-          </button>
-          <button
-            onClick={handlePrint}
-            disabled={printing}
-            className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#1D4ED8] transition-colors disabled:opacity-50"
-          >
-            <Printer size={15} /> {t('common.print')}
-          </button>
-        </div>
-      </div>
 
-      {/* On-screen ticket preview card */}
-      <div className="no-print flex justify-center">
-        <div className="bg-white rounded-2xl shadow-xl border border-border overflow-hidden" style={{ width: '360px' }}>
-          <div className="h-2 bg-linear-to-r from-[#2563EB] to-[#06B6D4]" />
-
-          <div className="p-6">
-            {/* School name */}
-            <div className="text-center mb-4">
-              <p className="text-[10px] font-bold tracking-[3px] text-slate-400 uppercase mb-1">
-                {school.schoolNameFr || 'EDUPILOT DZ'}
-              </p>
-              {school.schoolNameAr && (
-                <p className="text-sm font-bold text-[#0F172A]" dir="rtl">{school.schoolNameAr}</p>
-              )}
-              <div className="border-b border-dashed border-slate-300 my-2.5" />
-              <p className="text-xs font-bold tracking-[2px] text-[#0F172A] uppercase">TICKET ÉTUDIANT</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">Année scolaire: {school.academicYear}</p>
-            </div>
-
-            {/* Photo */}
-            <div className="flex justify-center mb-3">
-              {photoUrl ? (
-                <img
-                  src={photoUrl}
-                  alt={fullNameFr}
-                  className="w-20 h-20 rounded-full object-cover border-2 border-[#2563EB]"
-                />
-              ) : (
-                <div className="w-20 h-20 rounded-full bg-[#EFF6FF] border-2 border-[#2563EB] flex items-center justify-center text-[#2563EB] font-bold text-2xl">
-                  {initials}
-                </div>
-              )}
-            </div>
-
-            {/* Names */}
-            <div className="text-center mb-3">
-              <p className="font-bold text-[#0F172A] text-base" dir="rtl">{fullNameAr}</p>
-              <p className="text-slate-500 text-sm">{fullNameFr}</p>
-            </div>
-
-            <div className="border-b border-dashed border-slate-300 my-2.5" />
-
-            {/* Student details */}
-            <div className="space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">MATRICULE</span>
-                <span className="font-mono font-bold text-[#0F172A]">{student.studentNumber}</span>
-              </div>
-              {student.phone && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500 font-medium">TÉLÉPHONE</span>
-                  <span className="font-medium text-[#0F172A] dir-ltr">{student.phone}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="border-b border-dashed border-slate-300 my-2.5" />
-
-            {/* Classes, Subject & Teacher details */}
-            <div>
-              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase mb-2">
-                CLASSES & ENSEIGNANTS
-              </p>
-              <div className="space-y-2">
-                {activeEnrollments.length > 0 ? (
-                  activeEnrollments.map((en, idx) => (
-                    <div key={en.id || idx} className="bg-slate-50 border border-slate-200/80 rounded-lg p-2.5 text-xs space-y-1">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">المادة / Cours:</span>
-                        <span className="font-bold text-[#0F172A]">{en.courseName || en.groupName || '—'}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-medium">الفوج / Groupe:</span>
-                        <span className="font-semibold text-[#2563EB]">{en.groupName || `Groupe #${en.groupId}`}</span>
-                      </div>
-                      <div className="flex justify-between items-center pt-0.5 border-t border-slate-200/60">
-                        <span className="text-slate-500 font-medium">الأستاذ / Prof:</span>
-                        <span className="font-medium text-slate-800">{en.teacherName || 'Non assigné'}</span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-slate-400 italic">Aucune inscription active</p>
-                )}
-              </div>
-            </div>
-
-            <div className="border-b border-dashed border-slate-300 my-2.5" />
-
-            {/* QR Code */}
-            <div className="flex flex-col items-center gap-2">
-              {qrDataUrl ? (
-                <img src={qrDataUrl} alt="QR Code" className="w-32 h-32 rounded-lg" />
-              ) : (
-                <div className="w-32 h-32 bg-slate-100 rounded-lg flex items-center justify-center text-xs text-slate-400">
-                  Chargement...
-                </div>
-              )}
-              <p className="text-[9px] font-mono text-slate-400 text-center break-all max-w-65">{student.qrToken}</p>
-            </div>
-
-            <div className="border-b border-dashed border-slate-300 my-2.5" />
-
-            <p className="text-center text-[9px] text-slate-400">
-              Scannez ce QR Code pour afficher le profil & pointer
-            </p>
+          {/* Mode Switcher Tabs */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+            <button
+              onClick={() => { setCardMode('cr80'); setFlipCard(false) }}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                cardMode === 'cr80' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              بطاقة بلاستيكية CR80
+            </button>
+            <button
+              onClick={() => setCardMode('thermal')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                cardMode === 'thermal' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              تذكرة حرارية 80 مم
+            </button>
+            <button
+              onClick={() => setCardMode('a4_batch')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                cardMode === 'a4_batch' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              ورقة A4 جماعية (8)
+            </button>
           </div>
 
-          <div className="h-1 bg-linear-to-r from-[#2563EB] to-[#06B6D4]" />
-        </div>
-      </div>
-
-      <p className="text-center text-xs text-slate-400 mt-4 no-print">
-        Format ticket thermique 80mm · {student.studentNumber}
-      </p>
-
-      {/* Preview Modal */}
-      {showPreview && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-3 sm:p-6" onClick={() => setShowPreview(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl max-h-[90vh] max-w-lg w-full flex flex-col overflow-hidden animate-fade-in" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-slate-50 shrink-0">
-              <h3 className="font-bold text-[#0F172A] text-sm">Aperçu du ticket 80mm</h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSavePDF}
-                  disabled={printing}
-                  className="flex items-center gap-1.5 text-xs border border-[#2563EB] text-[#2563EB] px-3 py-1.5 rounded-lg hover:bg-[#EFF6FF] transition-colors disabled:opacity-50 font-semibold"
-                >
-                  <Download size={13} /> {t('common.export')} PDF
-                </button>
-                <button
-                  onClick={handlePrint}
-                  disabled={printing}
-                  className="flex items-center gap-1.5 text-xs bg-[#2563EB] text-white px-3 py-1.5 rounded-lg hover:bg-[#1D4ED8] transition-colors disabled:opacity-50 font-semibold"
-                >
-                  <Printer size={13} /> {t('common.print')}
-                </button>
-                <button
-                  onClick={() => setShowPreview(false)}
-                  className="text-slate-400 hover:text-slate-600 transition-colors w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-200"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="p-4 sm:p-6 flex justify-center bg-slate-100 overflow-y-auto flex-1">
-              <div className="shadow-lg bg-white rounded-xs">
-                <TicketContent />
-              </div>
-            </div>
+          {/* Print & PDF Export Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSavePDF}
+              disabled={printing}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-600" />
+              حفظ PDF
+            </button>
+            <button
+              onClick={handlePrint}
+              disabled={printing}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              طباعة البطاقة
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Action notification message */}
+        {actionMessage && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-semibold text-emerald-800 flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{actionMessage}</span>
+          </div>
+        )}
+
+        {/* Main Preview Center Stage */}
+        <div className="bg-slate-900/90 rounded-3xl p-8 sm:p-12 border border-slate-800 flex flex-col items-center justify-center min-h-[420px] shadow-2xl relative overflow-hidden">
+          {cardMode === 'cr80' && (
+            <div className="flex flex-col items-center gap-4">
+              <div
+                className="cursor-pointer transition-transform duration-300 hover:scale-102"
+                onClick={() => setFlipCard(!flipCard)}
+                title="انقر لقلب البطاقة للوجه الآخر"
+              >
+                {!flipCard ? <Cr80CardFront /> : <Cr80CardBack />}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setFlipCard(!flipCard)}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700 transition-colors"
+              >
+                <RefreshCw className="w-3 h-3" />
+                {flipCard ? 'عرض الوجه الأمامي' : 'عرض الوجه الخلفي للبطاقة'}
+              </button>
+            </div>
+          )}
+
+          {cardMode === 'thermal' && (
+            <div className="bg-white rounded-xl shadow-xl overflow-hidden p-2 max-w-sm">
+              <ThermalTicket />
+            </div>
+          )}
+
+          {cardMode === 'a4_batch' && (
+            <div className="overflow-x-auto max-w-full bg-slate-800 p-4 rounded-2xl">
+              <div className="scale-75 origin-top">
+                <A4BatchSheet />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Card Lifecycle & Security Panel */}
+        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-teal-600" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">إدارة دورة حياة بطاقة الطالب (Lifecycle & Security)</h3>
+                <p className="text-xs text-slate-500">حالة البطاقة الحالية، الرمز المشفر، وسجل الإصدارات</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleIssueNewCard}
+                className="px-3 py-1.5 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 text-xs font-semibold hover:bg-teal-100 transition-colors"
+              >
+                إصدار بطاقة جديدة
+              </button>
+              {activeCard && (
+                <button
+                  onClick={handleMarkLost}
+                  className="px-3 py-1.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold hover:bg-red-100 transition-colors"
+                >
+                  الإبلاغ عن ضياع
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-slate-400 block mb-0.5">الحالة الحالية:</span>
+              <span className={`font-bold inline-flex items-center gap-1 ${
+                activeCard?.status === 'ACTIVE' ? 'text-emerald-700' : 'text-slate-600'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${activeCard?.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                {activeCard?.status || 'لم تصدر بطاقة رسمية'}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-slate-400 block mb-0.5">الرمز المشفر (QR Token):</span>
+              <span className="font-mono font-bold text-slate-800 truncate block" title={secureToken}>
+                {secureToken}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-slate-400 block mb-0.5">تاريخ الإصدار:</span>
+              <span className="font-semibold text-slate-800">
+                {activeCard?.issuedAt?.slice(0, 10) || student.registrationDate}
+              </span>
+            </div>
+          </div>
+
+          {cardHistory.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <h4 className="text-xs font-semibold text-slate-700 mb-2">سجل البطاقات السابقة:</h4>
+              <div className="space-y-1.5">
+                {cardHistory.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between p-2 rounded-xl bg-slate-50 text-xs text-slate-600">
+                    <span className="font-mono text-[11px]">{c.cardToken.slice(0, 20)}...</span>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                      c.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {c.status}
+                    </span>
+                    <span className="text-slate-400 text-[11px]">{c.issuedAt?.slice(0, 10)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   )
 }

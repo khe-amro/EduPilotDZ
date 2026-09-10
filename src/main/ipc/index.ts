@@ -9,6 +9,15 @@ import { registerSessionsHandlers } from './sessions.ipc'
 import { registerMediaHandlers } from './media.ipc'
 import { registerNotesHandlers } from './notes.ipc'
 import { registerPrinterHandlers } from './printer.ipc'
+import { registerGuardianHandlers } from './guardians.ipc'
+import { registerCardHandlers } from './cards.ipc'
+import { registerDocumentHandlers } from './documents.ipc'
+import { registerWhatsAppHandlers } from './whatsapp.ipc'
+import { registerImportHandlers } from './import.ipc'
+import { registerDiagnosticsHandlers } from './diagnostics.ipc'
+import { registerSearchHandlers } from './search.ipc'
+import { registerNotificationHandlers } from './notifications.ipc'
+import { registerUserHandlers } from './users.ipc'
 import log from 'electron-log'
 
 export function registerAllIpcHandlers(): void {
@@ -23,5 +32,14 @@ export function registerAllIpcHandlers(): void {
   registerMediaHandlers()
   registerNotesHandlers()
   registerPrinterHandlers()
-  log.info('All IPC handlers registered')
+  registerGuardianHandlers()
+  registerCardHandlers()
+  registerDocumentHandlers()
+  registerWhatsAppHandlers()
+  registerImportHandlers()
+  registerDiagnosticsHandlers()
+  registerSearchHandlers()
+  registerNotificationHandlers()
+  registerUserHandlers()
+  log.info('All IPC handlers registered (Edupilot 2.0 Commercial)')
 }

@@ -19,7 +19,7 @@ export const ChangePasswordSchema = z.object({
 
 export const SetupSchema = z.object({
   schoolNameAr: z.string().min(1).max(200).trim(),
-  schoolNameFr: z.string().min(1).max(200).trim(),
+  schoolNameFr: z.string().max(200).trim().optional().default(''),
   schoolNameEn: z.string().max(200).trim().optional().nullable(),
   phone: z.string().max(50).trim().optional().nullable(),
   email: z.string().max(200).trim().optional().nullable().or(z.literal('')),
@@ -29,6 +29,8 @@ export const SetupSchema = z.object({
   adminUsername: z.string().min(1).max(50).trim(),
   adminPassword: z.string().min(4).max(200),
   preferredLanguage: z.enum(['ar', 'fr', 'en']).default('ar'),
+  logoPath: z.string().max(500).optional().nullable(),
+  schoolType: z.string().max(100).optional().default('Language School'),
 })
 
 // ─── Students ────────────────────────────────────────────────────────────────
@@ -192,6 +194,10 @@ export const UpdateSettingsSchema = z.object({
   receiptPaperWidth: z.enum(['80mm', '58mm']).optional(),
   autoPrintReceipt: z.boolean().optional(),
   showPrintDialog: z.boolean().optional(),
+  logoPath: z.string().max(500).optional().nullable(),
+  schoolLogoPath: z.string().max(500).optional().nullable(),
+  headerSubtitle: z.string().max(200).optional().nullable(),
+  schoolType: z.string().max(100).optional().nullable(),
 })
 
 // ─── Media ────────────────────────────────────────────────────────────────────

@@ -80,6 +80,7 @@ export function registerAuthHandlers(): void {
       schoolNameAr: data.schoolNameAr,
       schoolNameFr: data.schoolNameFr,
       schoolNameEn: data.schoolNameEn ?? '',
+      schoolLogoPath: data.logoPath ?? null,
       phone: data.phone ?? null,
       email: data.email || null,
       address: data.address ?? null,

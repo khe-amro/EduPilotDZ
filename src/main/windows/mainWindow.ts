@@ -49,7 +49,7 @@ export function createMainWindow(): BrowserWindow {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Edupilot DZ',
+    title: 'Edupilot 2 Commercial',
     icon: resolveIconPath(),
     show: false, // show after ready-to-show to avoid visual flash
     backgroundColor: '#F8FAFC',
@@ -114,7 +114,7 @@ export function createMainWindow(): BrowserWindow {
   if (process.env.NODE_ENV === 'development' && process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    win.loadFile(path.join(__dirname, '../renderer/index.html'))
+    win.loadFile(fileURLToPath(new URL('../renderer/index.html', import.meta.url)))
   }
 
   return win

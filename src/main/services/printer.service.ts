@@ -21,7 +21,7 @@ function loadFontAsBase64(filename: string): string {
       // Build output directory
       path.join(app.getAppPath(), 'out', 'renderer', 'assets', filename),
       // Direct relative fallback
-      path.join(__dirname, '..', '..', 'src', 'renderer', 'assets', 'fonts', filename),
+      path.join(app.getAppPath(), 'out', 'renderer', filename),
     ]
 
     for (const p of candidatePaths) {

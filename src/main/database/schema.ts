@@ -8,8 +8,9 @@ export const administrators = sqliteTable('administrators', {
   username: text('username').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   fullName: text('full_name').notNull(),
-  role: text('role', { enum: ['superadmin', 'admin'] }).notNull().default('admin'),
+  role: text('role', { enum: ['owner', 'superadmin', 'admin', 'secretary', 'registrar', 'accountant', 'teacher', 'viewer'] }).notNull().default('admin'),
   preferredLanguage: text('preferred_language', { enum: ['ar', 'fr', 'en'] }).notNull().default('ar'),
+  teacherId: integer('teacher_id').references((): any => teachers.id),
   photoPath: text('photo_path'),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
   failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
@@ -85,6 +86,8 @@ export const courses = sqliteTable('courses', {
   descriptionEn: text('description_en'),
   defaultPrice: real('default_price').notNull().default(0),
   defaultTeacherId: integer('default_teacher_id').references((): any => teachers.id),
+  billingModel: text('billing_model', { enum: ['MONTHLY', 'PER_SESSION', 'SESSION_PACKAGE', 'FIXED_COURSE_PRICE', 'FREE'] }).notNull().default('MONTHLY'),
+  packageSessionCount: integer('package_session_count'),
   status: text('status', { enum: ['active', 'inactive'] }).notNull().default('active'),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
@@ -101,6 +104,9 @@ export const groups = sqliteTable('groups', {
   scheduleJson: text('schedule_json'),
   capacity: integer('capacity').notNull().default(30),
   monthlyPrice: real('monthly_price').notNull().default(0),
+  billingModel: text('billing_model', { enum: ['MONTHLY', 'PER_SESSION', 'SESSION_PACKAGE', 'FIXED_COURSE_PRICE', 'FREE'] }).notNull().default('MONTHLY'),
+  packageSessionCount: integer('package_session_count'),
+  fixedPrice: real('fixed_price'),
   startDate: text('start_date').notNull(),
   endDate: text('end_date'),
   status: text('status', { enum: ['active', 'inactive', 'completed'] }).notNull().default('active'),
@@ -119,6 +125,9 @@ export const enrollments = sqliteTable('enrollments', {
   studentId: integer('student_id').notNull().references(() => students.id),
   groupId: integer('group_id').notNull().references(() => groups.id),
   agreedPrice: real('agreed_price').notNull(),
+  billingModel: text('billing_model', { enum: ['MONTHLY', 'PER_SESSION', 'SESSION_PACKAGE', 'FIXED_COURSE_PRICE', 'FREE'] }),
+  packageTotalSessions: integer('package_total_sessions'),
+  packageSessionsConsumed: integer('package_sessions_consumed').notNull().default(0),
   enrollmentDate: text('enrollment_date').notNull().default(sql`(date('now'))`),
   status: text('status', { enum: ['active', 'inactive', 'completed'] }).notNull().default('active'),
   cancelledAt: text('cancelled_at'),
@@ -130,6 +139,92 @@ export const enrollments = sqliteTable('enrollments', {
   studentGroupIdx: uniqueIndex('idx_enrollments_student_group').on(table.studentId, table.groupId),
   studentIdx: index('idx_enrollments_student').on(table.studentId),
   groupIdx: index('idx_enrollments_group').on(table.groupId),
+}))
+
+// ─── Guardians (First-class Family Model) ─────────────────────────────────────
+
+export const guardians = sqliteTable('guardians', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  fullName: text('full_name').notNull(),
+  phone: text('phone'),
+  whatsappPhone: text('whatsapp_phone'),
+  email: text('email'),
+  address: text('address'),
+  notes: text('notes'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  nameIdx: index('idx_guardians_name').on(table.fullName),
+  phoneIdx: index('idx_guardians_phone').on(table.phone),
+}))
+
+// ─── Student-Guardian Links ───────────────────────────────────────────────────
+
+export const studentGuardians = sqliteTable('student_guardians', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  studentId: integer('student_id').notNull().references(() => students.id),
+  guardianId: integer('guardian_id').notNull().references(() => guardians.id),
+  relationship: text('relationship').notNull().default('parent'),
+  isPrimary: integer('is_primary', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  studentGuardianIdx: uniqueIndex('idx_student_guardians_unique').on(table.studentId, table.guardianId),
+  studentIdx: index('idx_student_guardians_student').on(table.studentId),
+  guardianIdx: index('idx_student_guardians_guardian').on(table.guardianId),
+}))
+
+// ─── Student Cards & QR Lifecycle ─────────────────────────────────────────────
+
+export const studentCards = sqliteTable('student_cards', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  studentId: integer('student_id').notNull().references(() => students.id),
+  cardToken: text('card_token').notNull().unique(),
+  status: text('status', { enum: ['ACTIVE', 'LOST', 'REPLACED', 'DISABLED', 'EXPIRED'] }).notNull().default('ACTIVE'),
+  issuedAt: text('issued_at').notNull().default(sql`(datetime('now'))`),
+  expiresAt: text('expires_at'),
+  replacedByCardId: integer('replaced_by_card_id'),
+  notes: text('notes'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  tokenIdx: uniqueIndex('idx_student_cards_token').on(table.cardToken),
+  studentIdx: index('idx_student_cards_student').on(table.studentId),
+  statusIdx: index('idx_student_cards_status').on(table.status),
+}))
+
+// ─── Student Documents ────────────────────────────────────────────────────────
+
+export const studentDocuments = sqliteTable('student_documents', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  studentId: integer('student_id').notNull().references(() => students.id),
+  documentType: text('document_type', {
+    enum: ['id_card', 'birth_certificate', 'medical_certificate', 'enrollment_form', 'registration_form', 'contract', 'medical', 'other']
+  }).notNull().default('other'),
+  filePath: text('file_path').notNull(),
+  fileName: text('file_name').notNull(),
+  fileSize: integer('file_size').notNull().default(0),
+  mimeType: text('mime_type'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  studentIdx: index('idx_student_documents_student').on(table.studentId),
+  typeIdx: index('idx_student_documents_type').on(table.documentType),
+}))
+
+// ─── WhatsApp Templates ───────────────────────────────────────────────────────
+
+export const whatsappTemplates = sqliteTable('whatsapp_templates', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  templateKey: text('template_key').notNull().unique(),
+  nameAr: text('name_ar').notNull(),
+  nameFr: text('name_fr').notNull(),
+  nameEn: text('name_en').notNull(),
+  bodyAr: text('body_ar').notNull(),
+  bodyFr: text('body_fr').notNull(),
+  bodyEn: text('body_en').notNull(),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  keyIdx: uniqueIndex('idx_whatsapp_templates_key').on(table.templateKey),
 }))
 
 // ─── Group Schedule Slots (must be before attendance_sessions) ────────────────
@@ -251,10 +346,13 @@ export const payments = sqliteTable('payments', {
 
 export const schoolSettings = sqliteTable('school_settings', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  schoolLegalName: text('school_legal_name').notNull().default(''),
   schoolNameAr: text('school_name_ar').notNull().default(''),
   schoolNameFr: text('school_name_fr').notNull().default(''),
   schoolNameEn: text('school_name_en').notNull().default(''),
+  schoolLogoPath: text('school_logo_path'),
   phone: text('phone'),
+  whatsappPhone: text('whatsapp_phone'),
   email: text('email'),
   address: text('address'),
   academicYear: text('academic_year').notNull().default('2025-2026'),
@@ -262,6 +360,21 @@ export const schoolSettings = sqliteTable('school_settings', {
   studentNumberPrefix: text('student_number_prefix').notNull().default('ETU'),
   receiptPrefix: text('receipt_prefix').notNull().default('REC'),
   defaultLanguage: text('default_language', { enum: ['ar', 'fr', 'en'] }).notNull().default('ar'),
+  primaryAccentColor: text('primary_accent_color').notNull().default('#2563EB'),
+  receiptFooter: text('receipt_footer'),
+  countryCode: text('country_code').notNull().default('+213'),
+  schoolType: text('school_type').notNull().default('Language School'),
+  defaultBillingModel: text('default_billing_model').notNull().default('MONTHLY'),
+  studentCardsEnabled: integer('student_cards_enabled', { mode: 'boolean' }).notNull().default(true),
+  whatsappEnabled: integer('whatsapp_enabled', { mode: 'boolean' }).notNull().default(true),
+  teacherAccountsEnabled: integer('teacher_accounts_enabled', { mode: 'boolean' }).notNull().default(true),
+  documentsEnabled: integer('documents_enabled', { mode: 'boolean' }).notNull().default(true),
+  edition: text('edition').notNull().default('Commercial'),
+  licenseSchool: text('license_school'),
+  licenseId: text('license_id'),
+  licenseExpiresAt: text('license_expires_at'),
+  schemaVersion: integer('schema_version').notNull().default(1),
+  appVersion: text('app_version').notNull().default('2.0.0'),
   backupDirectory: text('backup_directory'),
   automaticBackupEnabled: integer('automatic_backup_enabled', { mode: 'boolean' }).notNull().default(false),
   backupsToRetain: integer('backups_to_retain').notNull().default(30),
@@ -306,6 +419,21 @@ export type SelectAdministrator = typeof administrators.$inferSelect
 export type InsertStudent = typeof students.$inferInsert
 export type SelectStudent = typeof students.$inferSelect
 
+export type InsertGuardian = typeof guardians.$inferInsert
+export type SelectGuardian = typeof guardians.$inferSelect
+
+export type InsertStudentGuardian = typeof studentGuardians.$inferInsert
+export type SelectStudentGuardian = typeof studentGuardians.$inferSelect
+
+export type InsertStudentCard = typeof studentCards.$inferInsert
+export type SelectStudentCard = typeof studentCards.$inferSelect
+
+export type InsertStudentDocument = typeof studentDocuments.$inferInsert
+export type SelectStudentDocument = typeof studentDocuments.$inferSelect
+
+export type InsertWhatsAppTemplate = typeof whatsappTemplates.$inferInsert
+export type SelectWhatsAppTemplate = typeof whatsappTemplates.$inferSelect
+
 export type InsertTeacher = typeof teachers.$inferInsert
 export type SelectTeacher = typeof teachers.$inferSelect
 
@@ -332,3 +460,7 @@ export type SelectGroupScheduleSlot = typeof groupScheduleSlots.$inferSelect
 
 export type InsertStudentNote = typeof studentNotes.$inferInsert
 export type SelectStudentNote = typeof studentNotes.$inferSelect
+
+export type InsertSchoolSettings = typeof schoolSettings.$inferInsert
+export type SelectSchoolSettings = typeof schoolSettings.$inferSelect
+

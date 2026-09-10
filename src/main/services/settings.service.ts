@@ -9,6 +9,9 @@ function mapRow(r: typeof schema.schoolSettings.$inferSelect): SchoolSettings {
     schoolNameAr: r.schoolNameAr,
     schoolNameFr: r.schoolNameFr,
     schoolNameEn: r.schoolNameEn,
+    schoolLogoPath: r.schoolLogoPath ?? null,
+    logoPath: r.schoolLogoPath ?? null,
+    headerSubtitle: (r as any).headerSubtitle ?? null,
     phone: r.phone ?? null,
     email: r.email ?? null,
     address: r.address ?? null,
@@ -24,6 +27,7 @@ function mapRow(r: typeof schema.schoolSettings.$inferSelect): SchoolSettings {
     receiptPaperWidth: r.receiptPaperWidth ?? '80mm',
     autoPrintReceipt: r.autoPrintReceipt ?? false,
     showPrintDialog: r.showPrintDialog ?? true,
+    schoolType: (r as any).schoolType ?? 'Language School',
     updatedAt: r.updatedAt,
   }
 }
@@ -38,6 +42,9 @@ export async function updateSettings(data: Partial<{
   schoolNameAr: string
   schoolNameFr: string
   schoolNameEn: string
+  logoPath: string | null
+  schoolLogoPath: string | null
+  headerSubtitle: string | null
   phone: string | null
   email: string | null
   address: string | null
@@ -51,6 +58,7 @@ export async function updateSettings(data: Partial<{
   receiptPaperWidth: string
   autoPrintReceipt: boolean
   showPrintDialog: boolean
+  schoolType: string | null
 }>): Promise<SchoolSettings> {
   requireSession()
   const db = getDb()
@@ -58,9 +66,23 @@ export async function updateSettings(data: Partial<{
   const existing = await db.query.schoolSettings.findFirst()
   const now = new Date().toISOString()
 
+  const finalLogo = data.logoPath !== undefined ? data.logoPath : data.schoolLogoPath
+
+  const payloadToSave: Record<string, any> = {
+    ...data,
+    updatedAt: now,
+  }
+  if (finalLogo !== undefined) {
+    payloadToSave.schoolLogoPath = finalLogo
+  }
+  if (data.schoolType !== undefined) {
+    payloadToSave.schoolType = data.schoolType
+  }
+  delete payloadToSave.logoPath
+
   if (existing) {
     const result = await db.update(schema.schoolSettings)
-      .set({ ...data, updatedAt: now })
+      .set(payloadToSave)
       .where(eq(schema.schoolSettings.id, existing.id))
       .returning()
     return mapRow(result[0]!)
@@ -69,6 +91,7 @@ export async function updateSettings(data: Partial<{
       schoolNameAr: data.schoolNameAr ?? '',
       schoolNameFr: data.schoolNameFr ?? '',
       schoolNameEn: data.schoolNameEn ?? '',
+      schoolLogoPath: finalLogo ?? null,
       phone: data.phone ?? null,
       email: data.email ?? null,
       address: data.address ?? null,

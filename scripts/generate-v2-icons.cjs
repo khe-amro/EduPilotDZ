@@ -1,0 +1,192 @@
+const { app, BrowserWindow } = require('electron')
+const fs = require('fs')
+const path = require('path')
+const pngToIco = require('png-to-ico')
+
+const ROOT = path.join(__dirname, '..')
+const BUILD_ICONS_DIR = path.join(ROOT, 'build', 'icons')
+const RENDERER_ASSETS_DIR = path.join(ROOT, 'src', 'renderer', 'assets')
+const PUBLIC_DIR = path.join(ROOT, 'public')
+
+for (const dir of [BUILD_ICONS_DIR, RENDERER_ASSETS_DIR, PUBLIC_DIR]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+}
+
+// Master SVG design: Edupilot 2.0 Commercial Logo
+// Transparent canvas + pure white circular container shape + centered unclipped logo geometry
+const SVG_CONTENT = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Soft circular shadow for depth on light and dark backgrounds -->
+    <filter id="circleShadow" x="-10%" y="-10%" width="125%" height="125%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.18" />
+    </filter>
+    
+    <!-- Linear Gradients for 3D Professional Visual Identity -->
+    <linearGradient id="shieldGrad" x1="256" y1="120" x2="256" y2="445" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E293B" />
+      <stop offset="100%" stop-color="#475569" />
+    </linearGradient>
+
+    <linearGradient id="blueDark" x1="140" y1="140" x2="256" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F2D59" />
+      <stop offset="100%" stop-color="#1E40AF" />
+    </linearGradient>
+
+    <linearGradient id="blueLight" x1="200" y1="100" x2="330" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1D4ED8" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+
+    <linearGradient id="greenPagesLeft" x1="180" y1="280" x2="250" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#15803D" />
+      <stop offset="100%" stop-color="#22C55E" />
+    </linearGradient>
+
+    <linearGradient id="greenPagesRight" x1="330" y1="280" x2="260" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#16A34A" />
+      <stop offset="100%" stop-color="#4ADE80" />
+    </linearGradient>
+
+    <linearGradient id="orangeArrow" x1="180" y1="360" x2="430" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EA580C" />
+      <stop offset="45%" stop-color="#F97316" />
+      <stop offset="100%" stop-color="#FB923C" />
+    </linearGradient>
+
+    <linearGradient id="orangeArrowFacet" x1="200" y1="380" x2="440" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C2410C" />
+      <stop offset="100%" stop-color="#EA580C" />
+    </linearGradient>
+
+    <linearGradient id="compassStar" x1="256" y1="90" x2="350" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="100%" stop-color="#0369A1" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Pure White Circular Container Shape with comfortable internal padding (Requirement 11 & 12) -->
+  <circle cx="256" cy="256" r="232" fill="#FFFFFF" filter="url(#circleShadow)" />
+  <circle cx="256" cy="256" r="230" stroke="#F1F5F9" stroke-width="2" />
+
+  <!-- 2. Lower Outer Shield Outline Frame -->
+  <path d="M175 365 C190 415, 230 442, 256 448 C282 442, 322 415, 337 365 C320 375, 290 382, 256 382 C222 382, 192 375, 175 365 Z"
+        fill="url(#shieldGrad)" opacity="0.9" />
+
+  <!-- 3. Compass Rose / Navigation Needle (North-East Star & Arc) -->
+  <!-- Compass Arc Behind Star -->
+  <path d="M295 130 A 85 85 0 0 1 350 205" stroke="#0284C7" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.8" />
+  <path d="M275 145 A 65 65 0 0 1 325 210" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.7" />
+
+  <!-- Compass Star Top Point -->
+  <polygon points="256,76 268,145 256,155" fill="#0284C7" />
+  <polygon points="256,76 256,155 244,145" fill="#0369A1" />
+
+  <!-- Compass Star Right/Diagonal Point -->
+  <polygon points="340,135 280,165 272,152" fill="#38BDF8" />
+  <polygon points="340,135 285,178 280,165" fill="#0284C7" />
+
+  <!-- 4. Open Book Pages (Green & Emerald Knowledge Base) -->
+  <!-- Left Pages Stack -->
+  <path d="M252 386 C215 378, 172 360, 142 320 L146 250 C175 285, 218 300, 252 304 Z" fill="url(#greenPagesLeft)" />
+  <path d="M252 365 C220 358, 180 342, 155 306 L158 245 C185 278, 222 292, 252 295 Z" fill="#16A34A" opacity="0.6" />
+  <path d="M252 342 C224 336, 192 322, 170 292 L172 242 C195 270, 225 282, 252 285 Z" fill="#22C55E" opacity="0.7" />
+
+  <!-- Right Pages Stack -->
+  <path d="M260 386 C297 378, 340 360, 370 320 L366 250 C337 285, 294 300, 260 304 Z" fill="url(#greenPagesRight)" />
+  <path d="M260 365 C292 358, 332 342, 357 306 L354 245 C327 278, 290 292, 260 295 Z" fill="#22C55E" opacity="0.6" />
+  <path d="M260 342 C288 336, 320 322, 342 292 L340 242 C317 270, 287 282, 260 285 Z" fill="#4ADE80" opacity="0.7" />
+
+  <!-- Book Spine Base (Dark Navy) -->
+  <path d="M136 320 C170 368, 218 392, 256 398 C294 392, 342 368, 376 320 L370 328 C338 375, 292 399, 256 405 C220 399, 174 375, 142 328 Z" fill="#0F172A" />
+
+  <!-- 5. Academic Graduation Cap (Mortarboard & Tassel) -->
+  <!-- Diamond Cap Top -->
+  <polygon points="210,135 155,185 252,228 298,175" fill="url(#blueLight)" />
+  <polygon points="155,185 252,228 252,238 155,195" fill="url(#blueDark)" />
+  <!-- Cap Skull Base -->
+  <path d="M192 205 L192 232 C192 250, 240 262, 256 262 C262 262, 270 259, 276 255 L276 218 Z" fill="url(#blueDark)" />
+  <!-- Tassel Button & String -->
+  <circle cx="230" cy="180" r="4.5" fill="#F8FAFC" />
+  <path d="M230 182 C205 195, 185 220, 182 245" stroke="#F8FAFC" stroke-width="3" stroke-linecap="round" fill="none" />
+  <polygon points="182,245 178,268 186,268" fill="#F8FAFC" />
+
+  <!-- 6. Powerful Dynamic Upward Growth Arrow (Vivid Orange Zig-Zag & Ascent) -->
+  <!-- Shadow/Facet under the arrow -->
+  <path d="M195 385 L260 305 L292 332 L395 195 L395 240 L375 222 L290 350 L256 320 L205 385 Z" fill="url(#orangeArrowFacet)" />
+  <!-- Main Orange Arrow Body -->
+  <path d="M185 378 L256 295 L295 328 L405 182 L388 170 L452 142 L438 212 L418 195 L295 342 L256 310 L195 385 Z" fill="url(#orangeArrow)" />
+  
+  <!-- Arrowhead Accent Tip Highlight -->
+  <polygon points="452,142 418,175 438,212" fill="#F97316" />
+  <polygon points="452,142 388,170 418,175" fill="#FDBA74" />
+</svg>
+`
+
+// Save master SVG
+const svgPath = path.join(RENDERER_ASSETS_DIR, 'logo-v2.svg')
+fs.writeFileSync(svgPath, SVG_CONTENT)
+console.log('✓ Saved master vector SVG:', svgPath)
+
+// Also save to public
+fs.writeFileSync(path.join(PUBLIC_DIR, 'logo-v2.svg'), SVG_CONTENT)
+
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({
+    width: 512,
+    height: 512,
+    show: false,
+    transparent: true,
+    frame: false,
+    webPreferences: {
+      offscreen: true,
+    },
+  })
+
+  // Data URI of the SVG
+  const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(SVG_CONTENT)
+  await win.loadURL(dataUri)
+
+  // Capture at different sizes
+  const sizes = [16, 24, 32, 48, 64, 128, 256, 512]
+  const pngBuffers = []
+
+  for (const size of sizes) {
+    win.setSize(size, size)
+    // small wait for render repaint
+    await new Promise((r) => setTimeout(r, 60))
+    const nativeImg = await win.webContents.capturePage()
+    const resized = nativeImg.resize({ width: size, height: size, quality: 'best' })
+    const pngBuffer = resized.toPNG()
+
+    // Save individual PNG
+    const filename = size === 512 ? 'icon.png' : `icon-${size}.png`
+    fs.writeFileSync(path.join(BUILD_ICONS_DIR, filename), pngBuffer)
+    console.log(`✓ build/icons/${filename} (${size}x${size})`)
+
+    if (size === 256 || size === 512) {
+      fs.writeFileSync(path.join(RENDERER_ASSETS_DIR, filename), pngBuffer)
+      fs.writeFileSync(path.join(PUBLIC_DIR, filename), pngBuffer)
+    }
+
+    if (size <= 256) {
+      pngBuffers.push(pngBuffer)
+    }
+  }
+
+  // Also set icon.png in renderer assets and public
+  const master512 = fs.readFileSync(path.join(BUILD_ICONS_DIR, 'icon.png'))
+  fs.writeFileSync(path.join(RENDERER_ASSETS_DIR, 'icon.png'), master512)
+  fs.writeFileSync(path.join(PUBLIC_DIR, 'icon.png'), master512)
+  fs.writeFileSync(path.join(PUBLIC_DIR, 'online-education.png'), master512)
+  console.log('✓ Updated renderer assets & public icon.png')
+
+  // Generate multi-resolution icon.ico
+  console.log('Generating multi-resolution icon.ico...')
+  const icoBuffer = await pngToIco(pngBuffers)
+  fs.writeFileSync(path.join(BUILD_ICONS_DIR, 'icon.ico'), icoBuffer)
+  fs.writeFileSync(path.join(PUBLIC_DIR, 'favicon.ico'), icoBuffer)
+  console.log('✓ build/icons/icon.ico generated successfully!')
+
+  app.quit()
+})

@@ -99,4 +99,12 @@ export function registerStudentHandlers(): void {
     const { studentId } = z.object({ studentId: z.number().int().positive() }).parse(payload)
     return getStudentAttendanceHistory(studentId)
   })
+
+  // ─── Student Timeline ─────────────────────────────────────────────────────
+
+  handle(IPC_CHANNELS.STUDENTS_TIMELINE, async (payload) => {
+    const { studentId } = z.object({ studentId: z.number().int().positive() }).parse(payload)
+    const { getStudentTimeline } = await import('../services/student.service')
+    return getStudentTimeline(studentId)
+  })
 }

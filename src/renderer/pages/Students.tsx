@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, UserX, RotateCcw, X, ChevronDown, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, Search, UserX, RotateCcw, X, ChevronDown, CheckCircle2, AlertCircle, FileSpreadsheet } from 'lucide-react'
 import type { PaginatedResult, Student, Course, Teacher, Group } from '@shared/types/index'
 import { getCourseName } from '../utils/format'
+import StudentImportModal from '../components/StudentImportModal'
 
 const PAGE_SIZE = 20
 
@@ -102,6 +103,7 @@ export default function Students() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'in_debt' | 'archived'>('all')
   const [loading, setLoading] = useState(true)
+  const [showImportModal, setShowImportModal] = useState(false)
   const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Hierarchy filter lists
@@ -381,13 +383,22 @@ export default function Students() {
           </button>
         </div>
 
-        <button
-          onClick={() => navigate('/students/new')}
-          className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-[#1D4ED8] transition-colors shrink-0 shadow-xs"
-        >
-          <Plus size={14} />
-          {t('students.add')}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+          >
+            <FileSpreadsheet size={14} className="text-emerald-600" />
+            استيراد Excel / CSV
+          </button>
+          <button
+            onClick={() => navigate('/students/new')}
+            className="flex items-center gap-2 bg-[#2563EB] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-[#1D4ED8] transition-colors shadow-xs cursor-pointer"
+          >
+            <Plus size={14} />
+            {t('students.add')}
+          </button>
+        </div>
       </div>
 
       {/* Hierarchical Filters (Module -> Teacher -> Group) */}
@@ -554,6 +565,11 @@ export default function Students() {
           </div>
         )}
       </div>
+      <StudentImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={() => load()}
+      />
     </div>
   )
 }

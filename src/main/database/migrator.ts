@@ -534,6 +534,139 @@ const MIGRATIONS: { version: number; name: string; sql: string }[] = [
         VALUES('schema_version', '10', datetime('now'));
     `,
   },
+  {
+    version: 11,
+    name: 'edupilot_2_commercial',
+    sql: `
+      CREATE TABLE IF NOT EXISTS guardians (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name TEXT NOT NULL,
+        phone TEXT,
+        whatsapp_phone TEXT,
+        email TEXT,
+        address TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_guardians_name ON guardians(full_name);
+      CREATE INDEX IF NOT EXISTS idx_guardians_phone ON guardians(phone);
+
+      CREATE TABLE IF NOT EXISTS student_guardians (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        guardian_id INTEGER NOT NULL REFERENCES guardians(id) ON DELETE CASCADE,
+        relationship TEXT NOT NULL DEFAULT 'parent',
+        is_primary INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_student_guardians_unique ON student_guardians(student_id, guardian_id);
+      CREATE INDEX IF NOT EXISTS idx_student_guardians_student ON student_guardians(student_id);
+      CREATE INDEX IF NOT EXISTS idx_student_guardians_guardian ON student_guardians(guardian_id);
+
+      CREATE TABLE IF NOT EXISTS student_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        card_token TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'LOST', 'REPLACED', 'DISABLED', 'EXPIRED')),
+        issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at TEXT,
+        replaced_by_card_id INTEGER,
+        notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_student_cards_token ON student_cards(card_token);
+      CREATE INDEX IF NOT EXISTS idx_student_cards_student ON student_cards(student_id);
+      CREATE INDEX IF NOT EXISTS idx_student_cards_status ON student_cards(status);
+
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        document_type TEXT NOT NULL DEFAULT 'other',
+        file_path TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        file_size INTEGER NOT NULL DEFAULT 0,
+        mime_type TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_student_documents_student ON student_documents(student_id);
+      CREATE INDEX IF NOT EXISTS idx_student_documents_type ON student_documents(document_type);
+
+      CREATE TABLE IF NOT EXISTS whatsapp_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_key TEXT NOT NULL UNIQUE,
+        name_ar TEXT NOT NULL,
+        name_fr TEXT NOT NULL,
+        name_en TEXT NOT NULL,
+        body_ar TEXT NOT NULL,
+        body_fr TEXT NOT NULL,
+        body_en TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_templates_key ON whatsapp_templates(template_key);
+
+      INSERT OR IGNORE INTO whatsapp_templates (template_key, name_ar, name_fr, name_en, body_ar, body_fr, body_en) VALUES
+        ('registration_confirm', 'تأكيد التسجيل', 'Confirmation d''inscription', 'Registration Confirmation',
+         'مرحباً {{guardian_name}}، نؤكد لكم تسجيل الطالب(ة) {{student_name}} في {{course}} ({{group}}) لدى {{school_name}}.',
+         'Bonjour {{guardian_name}}, nous vous confirmons l''inscription de l''élève {{student_name}} au cours {{course}} ({{group}}) à {{school_name}}.',
+         'Hello {{guardian_name}}, we confirm the enrollment of {{student_name}} in {{course}} ({{group}}) at {{school_name}}.'),
+        ('payment_receipt', 'وصل دفع', 'Reçu de paiement', 'Payment Receipt',
+         'مرحباً {{guardian_name}}، تم استلام مبلغ {{amount}} د.ج من أجل {{student_name}}. الرصيد الحالي: {{balance}} د.ج. شكراً لكم - {{school_name}}.',
+         'Bonjour {{guardian_name}}, nous avons bien reçu votre paiement de {{amount}} DZD pour {{student_name}}. Solde actuel: {{balance}} DZD. Merci - {{school_name}}.',
+         'Hello {{guardian_name}}, we received your payment of {{amount}} DZD for {{student_name}}. Current balance: {{balance}} DZD. Thank you - {{school_name}}.'),
+        ('payment_reminder', 'تذكير بالدفع', 'Rappel de paiement', 'Payment Reminder',
+         'تذكير من {{school_name}}: يرجى تسوية المستحقات المالية للطالب(ة) {{student_name}} البالغة {{balance}} د.ج في أقرب وقت. شكراً لتفهمكم.',
+         'Rappel de {{school_name}}: merci de bien vouloir régulariser la situation financière de {{student_name}} d''un montant de {{balance}} DZD. Merci de votre compréhension.',
+         'Reminder from {{school_name}}: please settle the outstanding balance of {{balance}} DZD for {{student_name}} at your earliest convenience. Thank you.'),
+        ('absence_notice', 'إشعار غياب', 'Avis d''absence', 'Absence Notice',
+         'نحيطكم علماً بأن الطالب(ة) {{student_name}} تغيب(ت) اليوم عن حصة {{course}} ({{group}}) بتاريخ {{session_date}}. {{school_name}}.',
+         'Nous vous informons que l''élève {{student_name}} était absent(e) aujourd''hui au cours de {{course}} ({{group}}) le {{session_date}}. {{school_name}}.',
+         'We inform you that student {{student_name}} was absent today from {{course}} ({{group}}) on {{session_date}}. {{school_name}}.'),
+        ('session_reminder', 'تذكير بموعد الحصة', 'Rappel de séance', 'Session Reminder',
+         'تذكير: حصة {{course}} ({{group}}) للطالب(ة) {{student_name}} مبرمجة يوم {{session_date}} على الساعة {{session_time}} مع الأستاذ {{teacher}}.',
+         'Rappel: le cours de {{course}} ({{group}}) pour {{student_name}} est prévu le {{session_date}} à {{session_time}} avec M./Mme {{teacher}}.',
+         'Reminder: the {{course}} ({{group}}) session for {{student_name}} is scheduled on {{session_date}} at {{session_time}} with {{teacher}}.');
+
+      ALTER TABLE courses ADD COLUMN billing_model TEXT NOT NULL DEFAULT 'MONTHLY';
+      ALTER TABLE courses ADD COLUMN package_session_count INTEGER;
+
+      ALTER TABLE groups ADD COLUMN billing_model TEXT NOT NULL DEFAULT 'MONTHLY';
+      ALTER TABLE groups ADD COLUMN package_session_count INTEGER;
+      ALTER TABLE groups ADD COLUMN fixed_price REAL;
+
+      ALTER TABLE enrollments ADD COLUMN billing_model TEXT;
+      ALTER TABLE enrollments ADD COLUMN package_total_sessions INTEGER;
+      ALTER TABLE enrollments ADD COLUMN package_sessions_consumed INTEGER NOT NULL DEFAULT 0;
+
+      ALTER TABLE attendance_sessions ADD COLUMN absence_charged INTEGER NOT NULL DEFAULT 1;
+
+      ALTER TABLE administrators ADD COLUMN teacher_id INTEGER;
+
+      ALTER TABLE school_settings ADD COLUMN school_legal_name TEXT NOT NULL DEFAULT '';
+      ALTER TABLE school_settings ADD COLUMN school_logo_path TEXT;
+      ALTER TABLE school_settings ADD COLUMN whatsapp_phone TEXT;
+      ALTER TABLE school_settings ADD COLUMN primary_accent_color TEXT NOT NULL DEFAULT '#2563EB';
+      ALTER TABLE school_settings ADD COLUMN receipt_footer TEXT;
+      ALTER TABLE school_settings ADD COLUMN country_code TEXT NOT NULL DEFAULT '+213';
+      ALTER TABLE school_settings ADD COLUMN school_type TEXT NOT NULL DEFAULT 'Language School';
+      ALTER TABLE school_settings ADD COLUMN default_billing_model TEXT NOT NULL DEFAULT 'MONTHLY';
+      ALTER TABLE school_settings ADD COLUMN student_cards_enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE school_settings ADD COLUMN whatsapp_enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE school_settings ADD COLUMN teacher_accounts_enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE school_settings ADD COLUMN documents_enabled INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE school_settings ADD COLUMN edition TEXT NOT NULL DEFAULT 'Commercial';
+      ALTER TABLE school_settings ADD COLUMN license_school TEXT;
+      ALTER TABLE school_settings ADD COLUMN license_id TEXT;
+      ALTER TABLE school_settings ADD COLUMN license_expires_at TEXT;
+      ALTER TABLE school_settings ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE school_settings ADD COLUMN app_version TEXT NOT NULL DEFAULT '2.0.0';
+
+      INSERT OR REPLACE INTO app_metadata(key, value, updated_at)
+        VALUES('schema_version', '11', datetime('now'));
+    `,
+  },
 ]
 
 // ─── Migration runner ─────────────────────────────────────────────────────────

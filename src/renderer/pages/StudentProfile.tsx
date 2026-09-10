@@ -5,9 +5,14 @@ import {
   ArrowLeft, Edit2, QrCode, RefreshCw, Archive,
   Phone, MapPin, Calendar, User, Shield, CreditCard,
   BookOpen, Clock, CheckCircle2, XCircle, StickyNote,
-  Plus, AlertCircle, ArrowRightLeft, X, Check, ChevronDown, RotateCcw, AlertTriangle, Trash2
+  Plus, AlertCircle, ArrowRightLeft, X, Check, ChevronDown, RotateCcw, AlertTriangle, Trash2,
+  FileText, File, Download, ExternalLink, Eye, Users, MessageCircle, Send, Upload
 } from 'lucide-react'
-import type { Student, Payment, Group, Course, Teacher } from '@shared/types/index'
+import type {
+  Student, Payment, Group, Course, Teacher,
+  Guardian, StudentGuardianLink, FamilySummary,
+  StudentDocument, TimelineEvent, DocumentType, WhatsAppTemplate
+} from '@shared/types/index'
 import { getCourseName, formatCurrency } from '../utils/format'
 import QRCode from 'qrcode'
 
@@ -103,7 +108,7 @@ function FilterCombobox({
   )
 }
 
-type Tab = 'overview' | 'attendance' | 'payments' | 'enrollments' | 'notes'
+type Tab = 'overview' | 'attendance' | 'payments' | 'enrollments' | 'timeline' | 'guardians' | 'documents' | 'notes'
 
 interface EnrollmentWithDetails {
   id: number
@@ -148,6 +153,12 @@ export default function StudentProfile() {
   const { id } = useParams()
   const navigate = useNavigate()
   const lang = i18n.language as 'ar' | 'fr' | 'en'
+
+  const tr = (ar: string, fr: string, en: string) => {
+    if (lang === 'ar') return ar
+    if (lang === 'fr') return fr
+    return en
+  }
 
   const [student, setStudent] = useState<Student | null>(null)
   const [loading, setLoading] = useState(true)
@@ -213,6 +224,37 @@ export default function StudentProfile() {
   const [transferCloseSource, setTransferCloseSource] = useState(true)
   const [transferReason, setTransferReason] = useState('')
   const [savingTransfer, setSavingTransfer] = useState(false)
+
+  // Timeline data
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
+
+  // Guardians data
+  const [studentGuardians, setStudentGuardians] = useState<Array<{ link: StudentGuardianLink; guardian: Guardian }>>([])
+  const [familySummaries, setFamilySummaries] = useState<Record<number, FamilySummary>>({})
+  const [showAddGuardianModal, setShowAddGuardianModal] = useState(false)
+  const [guardianFullName, setGuardianFullName] = useState('')
+  const [guardianPhone, setGuardianPhone] = useState('')
+  const [guardianWhatsapp, setGuardianWhatsapp] = useState('')
+  const [guardianRelationship, setGuardianRelationship] = useState('ولي أمر')
+  const [guardianEmail, setGuardianEmail] = useState('')
+  const [guardianAddress, setGuardianAddress] = useState('')
+  const [isPrimaryContact, setIsPrimaryContact] = useState(false)
+  const [savingGuardian, setSavingGuardian] = useState(false)
+
+  // Documents data
+  const [studentDocuments, setStudentDocuments] = useState<StudentDocument[]>([])
+  const [showUploadDocModal, setShowUploadDocModal] = useState(false)
+  const [selectedDocType, setSelectedDocType] = useState<DocumentType>('id_card')
+  const [uploadingDoc, setUploadingDoc] = useState(false)
+
+  // WhatsApp communication modal
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false)
+  const [whatsAppRecipientPhone, setWhatsAppRecipientPhone] = useState('')
+  const [whatsAppRecipientName, setWhatsAppRecipientName] = useState('')
+  const [whatsAppTemplates, setWhatsAppTemplates] = useState<WhatsAppTemplate[]>([])
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState('')
+  const [customWhatsAppMessage, setCustomWhatsAppMessage] = useState('')
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false)
 
   // Helper to load enrollments along with their credit balances
   const loadEnrollmentsWithBalances = useCallback(async (studentId: number) => {
@@ -311,6 +353,46 @@ export default function StudentProfile() {
         }
         if (activeTab === 'notes') {
           await loadStudentNotes(student!.id)
+        }
+        if (activeTab === 'timeline') {
+          try {
+            const tlRes = await window.schoolApp.students.timeline(student!.id)
+            if (tlRes && Array.isArray((tlRes as any).data)) {
+              setTimelineEvents((tlRes as any).data)
+            } else if (Array.isArray(tlRes)) {
+              setTimelineEvents(tlRes)
+            }
+          } catch (e) {
+            console.error('Failed to load timeline', e)
+          }
+        }
+        if (activeTab === 'guardians') {
+          try {
+            const gRes = await window.schoolApp.guardians.forStudent(student!.id)
+            if (gRes.success && gRes.data) {
+              setStudentGuardians(gRes.data)
+              for (const item of gRes.data) {
+                try {
+                  const sumRes = await window.schoolApp.guardians.familySummary(item.guardian.id)
+                  if (sumRes.success && sumRes.data) {
+                    setFamilySummaries((prev) => ({ ...prev, [item.guardian.id]: sumRes.data }))
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load guardians', e)
+          }
+        }
+        if (activeTab === 'documents') {
+          try {
+            const docRes = await window.schoolApp.documents.list(student!.id)
+            if (docRes.success && docRes.data) {
+              setStudentDocuments(docRes.data)
+            }
+          } catch (e) {
+            console.error('Failed to load documents', e)
+          }
         }
       } finally {
         setTabLoading(false)
@@ -694,6 +776,164 @@ export default function StudentProfile() {
     }
   }
 
+  // Guardian management
+  const handleCreateAndLinkGuardian = async () => {
+    if (!student || !guardianFullName.trim()) return
+    setSavingGuardian(true)
+    try {
+      const gRes = await window.schoolApp.guardians.create({
+        fullName: guardianFullName.trim(),
+        phone: guardianPhone.trim() || null,
+        whatsappPhone: guardianWhatsapp.trim() || guardianPhone.trim() || null,
+        email: guardianEmail.trim() || null,
+        address: guardianAddress.trim() || null,
+      })
+      if (gRes.success && gRes.data) {
+        await window.schoolApp.guardians.linkStudent({
+          studentId: student.id,
+          guardianId: gRes.data.id,
+          relationship: guardianRelationship || 'ولي أمر',
+          isPrimaryContact: isPrimaryContact,
+        })
+        setShowAddGuardianModal(false)
+        setGuardianFullName('')
+        setGuardianPhone('')
+        setGuardianWhatsapp('')
+        setGuardianEmail('')
+        setGuardianAddress('')
+        const reloadRes = await window.schoolApp.guardians.forStudent(student.id)
+        if (reloadRes.success && reloadRes.data) {
+          setStudentGuardians(reloadRes.data)
+          for (const item of reloadRes.data) {
+            const sumRes = await window.schoolApp.guardians.familySummary(item.guardian.id)
+            if (sumRes.success && sumRes.data) {
+              setFamilySummaries((prev) => ({ ...prev, [item.guardian.id]: sumRes.data }))
+            }
+          }
+        }
+      } else {
+        alert((gRes as any).error || t('common.error'))
+      }
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    } finally {
+      setSavingGuardian(false)
+    }
+  }
+
+  const handleUnlinkGuardian = async (guardianId: number) => {
+    if (!student) return
+    const confirmMsg = lang === 'ar' ? 'هل أنت متأكد من فك ارتباط ولي الأمر؟' : 'Dissocier ce tuteur de l\'élève ?'
+    if (!window.confirm(confirmMsg)) return
+    try {
+      const res = await window.schoolApp.guardians.unlinkStudent(student.id, guardianId)
+      if (res.success) {
+        setStudentGuardians((prev) => prev.filter((item) => item.guardian.id !== guardianId))
+      } else {
+        alert((res as any).error || t('common.error'))
+      }
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    }
+  }
+
+  // Documents management
+  const handleUploadDocument = async () => {
+    if (!student) return
+    setUploadingDoc(true)
+    try {
+      const res = await window.schoolApp.documents.upload(student.id, selectedDocType)
+      if (res.success && res.data) {
+        const uploaded = res.data
+        setStudentDocuments((prev) => [uploaded, ...prev])
+        setShowUploadDocModal(false)
+      } else if ((res as any).error) {
+        alert((res as any).error)
+      }
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    } finally {
+      setUploadingDoc(false)
+    }
+  }
+
+  const handleDeleteDocument = async (docId: number) => {
+    const confirmMsg = lang === 'ar' ? 'هل أنت متأكد من حذف هذه الوثيقة نهائياً؟' : 'Supprimer définitivement ce document ?'
+    if (!window.confirm(confirmMsg)) return
+    try {
+      const res = await window.schoolApp.documents.delete(docId)
+      if (res.success) {
+        setStudentDocuments((prev) => prev.filter((d) => d.id !== docId))
+      } else {
+        alert((res as any).error || t('common.error'))
+      }
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    }
+  }
+
+  const handleOpenDocument = async (docId: number) => {
+    try {
+      await window.schoolApp.documents.getUrl(docId)
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    }
+  }
+
+  // WhatsApp helper
+  const handleOpenWhatsAppModal = async (phone: string, recipientName: string) => {
+    setWhatsAppRecipientPhone(phone)
+    setWhatsAppRecipientName(recipientName)
+    setCustomWhatsAppMessage('')
+    setShowWhatsAppModal(true)
+    try {
+      const res = await window.schoolApp.whatsapp.getTemplates()
+      if (res.success && res.data && res.data.length > 0) {
+        setWhatsAppTemplates(res.data)
+        setSelectedTemplateKey(res.data[0].templateKey)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const handleSendWhatsApp = async () => {
+    if (!whatsAppRecipientPhone) return
+    setSendingWhatsApp(true)
+    try {
+      const totalBalance = enrollments.reduce((acc, e) => acc + (e.balance ?? 0), 0)
+      const firstCourse = enrollments[0]?.courseName || ''
+      const firstGroup = enrollments[0]?.groupName || ''
+      const allCourses = enrollments.map((e) => e.courseName).filter(Boolean).join('، ')
+      const allGroups = enrollments.map((e) => e.groupName).filter(Boolean).join('، ')
+      const studentFullName = `${student?.lastNameAr || ''} ${student?.firstNameAr || ''}`.trim() || `${student?.lastNameFr || ''} ${student?.firstNameFr || ''}`.trim()
+
+      await window.schoolApp.whatsapp.open(
+        whatsAppRecipientPhone,
+        selectedTemplateKey || 'registration_confirm',
+        {
+          studentName: studentFullName,
+          student_name: studentFullName,
+          guardianName: whatsAppRecipientName,
+          guardian_name: whatsAppRecipientName,
+          course: firstCourse || allCourses || 'المواد المسجلة',
+          courseName: firstCourse || allCourses || 'المواد المسجلة',
+          course_name: firstCourse || allCourses || 'المواد المسجلة',
+          group: firstGroup || allGroups || 'الفوج',
+          groupName: firstGroup || allGroups || 'الفوج',
+          group_name: firstGroup || allGroups || 'الفوج',
+          balance: String(Math.abs(totalBalance)),
+          amount: String(Math.abs(totalBalance)),
+          message: customWhatsAppMessage,
+        },
+        lang
+      )
+      setShowWhatsAppModal(false)
+    } catch (err: any) {
+      alert(err?.message || t('common.error'))
+    } finally {
+      setSendingWhatsApp(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-20">
@@ -713,6 +953,9 @@ export default function StudentProfile() {
     { key: 'attendance', label: t('students.courseHistory') },
     { key: 'payments', label: t('nav.payments') },
     { key: 'enrollments', label: t('students.enrollments') },
+    { key: 'timeline', label: lang === 'ar' ? 'السجل الزمني' : lang === 'en' ? 'Timeline' : 'Chronologie' },
+    { key: 'guardians', label: lang === 'ar' ? 'الأولياء والعائلة' : lang === 'en' ? 'Guardians' : 'Tuteurs' },
+    { key: 'documents', label: lang === 'ar' ? 'الوثائق' : lang === 'en' ? 'Documents' : 'Documents' },
     { key: 'notes', label: t('common.notes') },
   ]
 
@@ -731,6 +974,14 @@ export default function StudentProfile() {
           <ArrowLeft size={15} /> {t('common.back')}
         </button>
         <div className="flex gap-2">
+          {(student.phone || student.guardianPhone) && (
+            <button
+              onClick={() => handleOpenWhatsAppModal(student.phone || student.guardianPhone || '', `${student.lastNameAr} ${student.firstNameAr}`)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+            >
+              <MessageCircle size={13} /> WhatsApp
+            </button>
+          )}
           <button
             onClick={() => navigate(`/students/${student.id}/card`)}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors shadow-xs"
@@ -1333,6 +1584,360 @@ export default function StudentProfile() {
                     )}
                   </div>
                 )}
+
+                {/* ─── Timeline Tab ─── */}
+                {activeTab === 'timeline' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-sm text-[#0F172A]">
+                        {lang === 'ar' ? 'السجل الزمني الشامل للتلميذ' : lang === 'en' ? 'Comprehensive Student Timeline' : 'Chronologie complète de l\'élève'}
+                      </h4>
+                      <span className="text-xs text-slate-400 font-mono">
+                        {timelineEvents.length} {lang === 'ar' ? 'حدث' : 'events'}
+                      </span>
+                    </div>
+
+                    {timelineEvents.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                        <Clock size={36} className="mx-auto mb-2 opacity-30" />
+                        <p className="text-sm">{lang === 'ar' ? 'لا توجد أحداث مسجلة بعد' : 'No recorded timeline events'}</p>
+                      </div>
+                    ) : (
+                      <div className="relative pl-6 pr-6 space-y-4 before:absolute before:top-2 before:bottom-2 before:inset-s-4 before:w-0.5 before:bg-slate-200">
+                        {timelineEvents.map((evt) => {
+                          const isPay = evt.type === 'payment'
+                          const isAtt = evt.type === 'attendance'
+                          const isEnr = evt.type === 'enrollment'
+                          const isCard = evt.type === 'card'
+                          const isDoc = evt.type === 'document'
+
+                          return (
+                            <div key={evt.id} className="relative group">
+                              <div className={`absolute -inset-s-6 mt-1.5 w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] shadow-xs ${
+                                isPay ? 'bg-emerald-600' :
+                                isAtt ? 'bg-blue-600' :
+                                isEnr ? 'bg-indigo-600' :
+                                isCard ? 'bg-violet-600' :
+                                isDoc ? 'bg-cyan-600' : 'bg-amber-500'
+                              }`}>
+                                {isPay ? <CreditCard size={12} /> :
+                                 isAtt ? <CheckCircle2 size={12} /> :
+                                 isEnr ? <BookOpen size={12} /> :
+                                 isCard ? <QrCode size={12} /> :
+                                 isDoc ? <FileText size={12} /> : <StickyNote size={12} />}
+                              </div>
+
+                              <div className="ms-3 bg-white p-3.5 rounded-xl border border-slate-200 hover:border-blue-300 transition-colors shadow-2xs">
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <span className="font-bold text-xs text-[#0F172A]">{evt.title}</span>
+                                  <div className="flex items-center gap-2">
+                                    {evt.badge && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                        {evt.badge}
+                                      </span>
+                                    )}
+                                    {evt.amount !== undefined && (
+                                      <span className="text-xs font-bold text-emerald-600">
+                                        +{evt.amount.toLocaleString()} DA
+                                      </span>
+                                    )}
+                                    <span className="text-[11px] text-slate-400 font-mono">
+                                      {new Date(evt.date).toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+                                {evt.description && (
+                                  <p className="text-xs text-slate-600 mt-1 whitespace-pre-wrap">{evt.description}</p>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ─── Guardians Tab ─── */}
+                {activeTab === 'guardians' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-sm text-[#0F172A]">
+                          {tr('الأولياء وجهات الاتصال العائلية', 'Tuteurs et contacts familiaux', 'Guardians & Family Contacts')}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {tr('إدارة أولياء الأمور، كشف الحساب العائلي الموحد، والمراسلة المباشرة', 'Gestion des tuteurs, compte familial unifié et messagerie directe', 'Manage guardians, unified family balances, and direct messaging')}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setGuardianFullName('')
+                          setGuardianPhone('')
+                          setGuardianWhatsapp('')
+                          setGuardianRelationship('ولي أمر')
+                          setGuardianEmail('')
+                          setGuardianAddress('')
+                          setIsPrimaryContact(studentGuardians.length === 0)
+                          setShowAddGuardianModal(true)
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2563EB] hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors shadow-xs cursor-pointer"
+                      >
+                        <Plus size={13} /> {tr('ربط ولي أمر جديد', 'Associer un tuteur', 'Link New Guardian')}
+                      </button>
+                    </div>
+
+                    {studentGuardians.length === 0 ? (
+                      student?.guardianName || student?.guardianPhone ? (
+                        <div className="bg-white rounded-xl border border-blue-200 p-4 shadow-xs space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-full bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold text-sm">
+                                <User size={18} />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h5 className="font-bold text-sm text-[#0F172A]">{student.guardianName || tr('ولي أمر الطالب', 'Tuteur de l\'élève', 'Student Guardian')}</h5>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                                    {student.guardianRelationship === 'parent' ? tr('ولي أمر', 'Parent', 'Guardian') : (student.guardianRelationship || tr('ولي أمر', 'Parent', 'Guardian'))}
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
+                                    {tr('الجهة المسجلة للمراسلة', 'Contact enregistré', 'Registered Contact')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-4 text-xs text-slate-500 mt-1 flex-wrap">
+                                  {student.guardianPhone && (
+                                    <span className="flex items-center gap-1 font-mono" dir="ltr">
+                                      <Phone size={11} className="text-slate-400" /> {student.guardianPhone}
+                                    </span>
+                                  )}
+                                  {student.guardianPhone && (
+                                    <span className="flex items-center gap-1 text-emerald-600 font-mono" dir="ltr">
+                                      <MessageCircle size={11} /> {student.guardianPhone}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {student.guardianPhone && (
+                              <button
+                                onClick={() => handleOpenWhatsAppModal(student.guardianPhone || '', student.guardianName || '')}
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                                title="WhatsApp"
+                              >
+                                <MessageCircle size={13} /> {tr('واتساب', 'WhatsApp', 'WhatsApp')}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                          <Users size={36} className="mx-auto mb-2 opacity-30" />
+                          <p className="text-sm font-medium">{tr('لا يوجد أولياء أمور مربوطون حالياً', 'Aucun tuteur associé pour le moment', 'No guardians linked yet')}</p>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {tr('يمكنك ربط ولي أمر لتتبع الإخوة والديون العائلية والمراسلة التلقائية', 'Associez un tuteur pour suivre la fratrie, le solde familial et les messages automatiques', 'Link a guardian to track siblings, family balance, and auto-messaging')}
+                          </p>
+                        </div>
+                      )
+                    ) : (
+                      <div className="space-y-4">
+                        {studentGuardians.map(({ link, guardian }) => {
+                          const famSum = familySummaries[guardian.id]
+
+                          return (
+                            <div key={guardian.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
+                              <div className="flex items-start justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold text-sm">
+                                    <User size={18} />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h5 className="font-bold text-sm text-[#0F172A]">{guardian.fullName}</h5>
+                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                                        {link.relationship === 'parent' ? tr('ولي أمر', 'Parent', 'Guardian') : (link.relationship || tr('ولي أمر', 'Parent', 'Guardian'))}
+                                      </span>
+                                      {link.isPrimary && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
+                                          {tr('الجهة الرئيسية', 'Contact principal', 'Primary Contact')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-4 text-xs text-slate-500 mt-1 flex-wrap">
+                                      {guardian.phone && (
+                                        <span className="flex items-center gap-1 font-mono" dir="ltr">
+                                          <Phone size={11} className="text-slate-400" /> {guardian.phone}
+                                        </span>
+                                      )}
+                                      {guardian.whatsappPhone && (
+                                        <span className="flex items-center gap-1 text-emerald-600 font-mono" dir="ltr">
+                                          <MessageCircle size={11} /> {guardian.whatsappPhone}
+                                        </span>
+                                      )}
+                                      {guardian.email && (
+                                        <span className="text-slate-500">{guardian.email}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {(guardian.whatsappPhone || guardian.phone) && (
+                                    <button
+                                      onClick={() => handleOpenWhatsAppModal(guardian.whatsappPhone || guardian.phone || '', guardian.fullName)}
+                                      className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                                      title="WhatsApp"
+                                    >
+                                      <MessageCircle size={13} /> {tr('واتساب', 'WhatsApp', 'WhatsApp')}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleUnlinkGuardian(guardian.id)}
+                                    className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                    title={tr('فك الارتباط', 'Dissocier', 'Unlink')}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Family Summary box if guardian has multiple children */}
+                              {famSum && (
+                                <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                                      <Users size={13} className="text-[#2563EB]" />
+                                      {tr('الملف العائلي الموحد', 'Fichier familial unifié', 'Unified Family File')} ({famSum.students.length} {tr('أبناء مسجلين', 'enfants inscrits', 'students')})
+                                    </span>
+                                    <span className={`font-bold px-2.5 py-0.5 rounded-full ${
+                                      famSum.totalFamilyBalance < 0
+                                        ? 'bg-red-100 text-red-700'
+                                        : famSum.totalFamilyBalance > 0
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-slate-200 text-slate-700'
+                                    }`}>
+                                      {famSum.totalFamilyBalance < 0
+                                        ? `${tr('إجمالي دين العائلة: ', 'Dette totale de la famille : ', 'Total Debt: ')}${Math.abs(famSum.totalFamilyBalance).toLocaleString()} DA`
+                                        : `${tr('إجمالي رصيد العائلة: ', 'Crédit total de la famille : ', 'Total Credit: ')}+${famSum.totalFamilyBalance.toLocaleString()} DA`}
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                    {famSum.students.map((child) => (
+                                      <div
+                                        key={child.id}
+                                        onClick={() => child.id !== student.id && navigate(`/students/${child.id}`)}
+                                        className={`p-2 rounded-lg border flex items-center justify-between ${
+                                          child.id === student.id
+                                            ? 'bg-blue-50/50 border-blue-200 font-semibold'
+                                            : 'bg-white border-slate-200 hover:border-blue-300 cursor-pointer'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs text-[#0F172A]">{child.firstNameAr} {child.lastNameAr}</span>
+                                          {child.id === student.id && (
+                                            <span className="text-[9px] bg-[#2563EB] text-white px-1.5 py-0.2 rounded font-bold">
+                                              {tr('الحالي', 'Actuel', 'Current')}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <span className={`text-xs font-bold font-mono ${
+                                          child.totalBalance < 0 ? 'text-red-600' : child.totalBalance > 0 ? 'text-emerald-600' : 'text-slate-500'
+                                        }`}>
+                                          {child.totalBalance < 0 ? `-${Math.abs(child.totalBalance).toLocaleString()} DA` : `+${child.totalBalance.toLocaleString()} DA`}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ─── Documents Tab ─── */}
+                {activeTab === 'documents' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-sm text-[#0F172A]">
+                          {tr('الخزينة الرقمية للوثائق والملفات', 'Coffre-fort numérique des documents', 'Digital Student Document Vault')}
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          {tr('حفظ وأرشفة الوثائق المدرسية (شهادة الميلاد، بطاقة التعريف، الشهادة الطبية، الاستمارة)', 'Archivage sécurisé des pièces d\'identité, actes de naissance et certificats', 'Secure storage for IDs, birth certificates, contracts, and medical records')}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setShowUploadDocModal(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2563EB] hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors shadow-xs cursor-pointer"
+                      >
+                        <Upload size={13} /> {tr('رفع وثيقة جديدة', 'Téléverser un document', 'Upload Document')}
+                      </button>
+                    </div>
+
+                    {studentDocuments.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                        <FileText size={36} className="mx-auto mb-2 opacity-30" />
+                        <p className="text-sm font-medium">{tr('لا توجد وثائق مرفوعة في ملف التلميذ', 'Aucun document dans le dossier de l\'élève', 'No documents in student vault')}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {tr('يتم حفظ الملفات محلياً وبشكل آمن في مجلد Edupilot', 'Les fichiers sont archivés localement et en toute sécurité dans EduPilot', 'Files are securely archived locally in Edupilot Media Vault')}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {studentDocuments.map((doc) => {
+                          const sizeKb = Math.round(doc.fileSize / 1024)
+                          const sizeStr = sizeKb > 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`
+
+                          return (
+                            <div key={doc.id} className="bg-white rounded-xl border border-slate-200 p-3.5 flex items-center justify-between hover:shadow-xs transition-shadow">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-10 h-10 rounded-lg bg-blue-50 text-[#2563EB] flex items-center justify-center shrink-0">
+                                  <FileText size={20} />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-[#0F172A] truncate" title={doc.fileName}>
+                                    {doc.fileName}
+                                  </p>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                                    <span className="uppercase font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded text-[9px]">
+                                      {doc.documentType.replace('_', ' ')}
+                                    </span>
+                                    <span>{sizeStr}</span>
+                                    <span>·</span>
+                                    <span>{new Date(doc.createdAt).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0 ms-2">
+                                <button
+                                  onClick={() => handleOpenDocument(doc.id)}
+                                  className="p-1.5 text-slate-500 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                  title={tr('فتح ومعاينة', 'Ouvrir et prévisualiser', 'Open')}
+                                >
+                                  <Eye size={15} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDocument(doc.id)}
+                                  className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                  title={tr('حذف', 'Supprimer', 'Delete')}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1535,6 +2140,291 @@ export default function StudentProfile() {
               >
                 <ArrowRightLeft size={13} />
                 {savingTransfer ? t('common.saving') : t('students.confirmTransfer')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Add Guardian ── */}
+      {showAddGuardianModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowAddGuardianModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-fade-in space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="font-bold text-[#0F172A] text-base flex items-center gap-2">
+                <Users size={18} className="text-[#2563EB]" />
+                {tr('ربط ولي أمر جديد', 'Associer un tuteur', 'Link New Guardian')}
+              </h3>
+              <button onClick={() => setShowAddGuardianModal(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {tr('الاسم الكامل لولي الأمر *', 'Nom complet du tuteur *', 'Full Name *')}
+                </label>
+                <input
+                  type="text"
+                  value={guardianFullName}
+                  onChange={(e) => setGuardianFullName(e.target.value)}
+                  placeholder={tr('مثال: محمد بلقاسم', 'ex. Mohamed Belkacem', 'e.g. Mohamed Belkacem')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20 bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    {tr('صلة القرابة', 'Lien de parenté', 'Relationship')}
+                  </label>
+                  <select
+                    value={guardianRelationship}
+                    onChange={(e) => setGuardianRelationship(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
+                  >
+                    <option value="الأب">{tr('الأب', 'Père', 'Father')}</option>
+                    <option value="الأم">{tr('الأم', 'Mère', 'Mother')}</option>
+                    <option value="الأخ">{tr('الأخ', 'Frère', 'Brother')}</option>
+                    <option value="الأخت">{tr('الأخت', 'Sœur', 'Sister')}</option>
+                    <option value="العم/الخال">{tr('العم / الخال', 'Oncle', 'Uncle')}</option>
+                    <option value="ولي أمر قانوني">{tr('ولي أمر قانوني', 'Tuteur légal', 'Legal Guardian')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    {tr('رقم الهاتف *', 'Numéro de téléphone *', 'Phone *')}
+                  </label>
+                  <input
+                    type="text"
+                    value={guardianPhone}
+                    onChange={(e) => setGuardianPhone(e.target.value)}
+                    placeholder="05 / 06 / 07..."
+                    dir="ltr"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-[#2563EB] bg-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {tr('رقم واتساب (إذا كان مختلفاً)', 'Numéro WhatsApp (si différent)', 'WhatsApp Phone (if different)')}
+                </label>
+                <input
+                  type="text"
+                  value={guardianWhatsapp}
+                  onChange={(e) => setGuardianWhatsapp(e.target.value)}
+                  placeholder={tr('05 / 06 / 07... (اختياري)', '05 / 06 / 07... (optionnel)', '05 / 06 / 07... (optional)')}
+                  dir="ltr"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {tr('البريد الإلكتروني', 'Adresse e-mail', 'Email')}
+                </label>
+                <input
+                  type="email"
+                  value={guardianEmail}
+                  onChange={(e) => setGuardianEmail(e.target.value)}
+                  placeholder="example@mail.com"
+                  dir="ltr"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {tr('العنوان', 'Adresse', 'Address')}
+                </label>
+                <input
+                  type="text"
+                  value={guardianAddress}
+                  onChange={(e) => setGuardianAddress(e.target.value)}
+                  placeholder={tr('حي، شارع، بلدية...', 'Quartier, rue, commune...', 'City, district...')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={isPrimaryContact}
+                  onChange={(e) => setIsPrimaryContact(e.target.checked)}
+                  className="rounded text-[#2563EB] focus:ring-0"
+                />
+                <span className="text-slate-700 font-medium">
+                  {tr('تعيين كجهة اتصال رئيسية للتلميذ', 'Définir comme contact principal de l\'élève', 'Set as primary contact for student')}
+                </span>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setShowAddGuardianModal(false)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleCreateAndLinkGuardian}
+                disabled={savingGuardian || !guardianFullName.trim()}
+                className="px-4 py-2 bg-[#2563EB] hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer"
+              >
+                {savingGuardian ? t('common.saving') : t('common.save')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Upload Document ── */}
+      {showUploadDocModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowUploadDocModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-fade-in space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="font-bold text-[#0F172A] text-base flex items-center gap-2">
+                <Upload size={18} className="text-[#2563EB]" />
+                {tr('رفع وثيقة جديدة', 'Téléverser un document', 'Upload Document')}
+              </h3>
+              <button onClick={() => setShowUploadDocModal(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {tr('نوع الوثيقة *', 'Type de document *', 'Document Type *')}
+                </label>
+                <select
+                  value={selectedDocType}
+                  onChange={(e) => setSelectedDocType(e.target.value as DocumentType)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-xs font-medium"
+                >
+                  <option value="id_card">{tr('بطاقة التعريف الوطنية / جواز السفر', 'Carte d\'identité nationale / Passeport', 'ID Card / Passport')}</option>
+                  <option value="birth_certificate">{tr('شهادة الميلاد', 'Acte de naissance', 'Birth Certificate')}</option>
+                  <option value="medical_certificate">{tr('شهادة طبية', 'Certificat médical', 'Medical Certificate')}</option>
+                  <option value="enrollment_form">{tr('استمارة التسجيل', 'Formulaire d\'inscription', 'Registration Form')}</option>
+                  <option value="contract">{tr('التزام / عقد', 'Contrat / Engagement', 'Contract / Agreement')}</option>
+                  <option value="other">{tr('وثيقة أخرى', 'Autre document', 'Other Document')}</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-blue-800">
+                <p className="font-semibold mb-1">
+                  {tr('ملاحظة الأرشفة المحلية:', 'Note d\'archivage local :', 'Local Storage Note:')}
+                </p>
+                <p className="text-[11px] text-blue-700">
+                  {tr(
+                    'سيتم فتح نافذة اختيار الملفات من جهازك وحفظ نسخة آمنة داخل مجلد Edupilot التجاري. الصيغ المقبولة: PDF, PNG, JPG, DOCX.',
+                    'Une boîte de dialogue de sélection de fichier s\'ouvrira. Formats supportés : PDF, PNG, JPG, DOCX.',
+                    'A native file browser dialog will appear. Formats supported: PDF, PNG, JPG, DOCX.'
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setShowUploadDocModal(false)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleUploadDocument}
+                disabled={uploadingDoc}
+                className="px-4 py-2 bg-[#2563EB] hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Upload size={13} />
+                {uploadingDoc ? t('common.saving') : (lang === 'ar' ? 'اختيار الملف ورفعه' : 'Choose File & Upload')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: WhatsApp Communication ── */}
+      {showWhatsAppModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowWhatsAppModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-fade-in space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+              <h3 className="font-bold text-[#0F172A] text-base flex items-center gap-2">
+                <MessageCircle size={18} className="text-emerald-600" />
+                {lang === 'ar' ? 'إرسال رسالة واتساب مباشرة' : 'Send WhatsApp Message'}
+              </h3>
+              <button onClick={() => setShowWhatsAppModal(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">{lang === 'ar' ? 'المستلم:' : 'Recipient:'}</span>
+                  <span className="font-bold text-[#0F172A]">{whatsAppRecipientName}</span>
+                </div>
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-slate-500">{lang === 'ar' ? 'رقم الهاتف:' : 'Phone:'}</span>
+                  <span className="font-mono text-emerald-700 font-bold" dir="ltr">{whatsAppRecipientPhone}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {lang === 'ar' ? 'نموذج الرسالة المعتمد:' : 'Message Template:'}
+                </label>
+                <select
+                  value={selectedTemplateKey}
+                  onChange={(e) => setSelectedTemplateKey(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-xs font-medium"
+                >
+                  {whatsAppTemplates.map((tpl) => (
+                    <option key={tpl.templateKey} value={tpl.templateKey}>
+                      {lang === 'ar' ? tpl.nameAr : lang === 'en' ? tpl.nameEn : tpl.nameFr}
+                    </option>
+                  ))}
+                  <option value="custom">{lang === 'ar' ? 'رسالة مخصصة (نص حر)' : 'Custom Message'}</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  {lang === 'ar' ? 'نص إضافي أو مخصص:' : 'Custom Text / Notes:'}
+                </label>
+                <textarea
+                  rows={3}
+                  value={customWhatsAppMessage}
+                  onChange={(e) => setCustomWhatsAppMessage(e.target.value)}
+                  placeholder={lang === 'ar' ? 'اكتب ملاحظة خاصة لولي الأمر إن أردت...' : 'Optional custom note...'}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 bg-white"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                {lang === 'ar'
+                  ? 'سيتم فتح تطبيق واتساب الرسمي أو المتصفح برابط مباشر مع تعبئة المتغيرات (اسم التلميذ، الرصيد، والمؤسسة) تلقائياً.'
+                  : 'WhatsApp desktop/web will open automatically with prefilled template parameters.'}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setShowWhatsAppModal(false)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleSendWhatsApp}
+                disabled={sendingWhatsApp || !whatsAppRecipientPhone}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Send size={13} />
+                {sendingWhatsApp ? t('common.saving') : (lang === 'ar' ? 'فتح في واتساب' : 'Open WhatsApp')}
               </button>
             </div>
           </div>

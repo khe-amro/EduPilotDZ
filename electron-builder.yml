@@ -1,10 +1,10 @@
-appId: com.edupilot.dz
-productName: Edupilot DZ
-copyright: Copyright © 2026 Edupilot DZ
-buildVersion: 1.0.0
+appId: com.edupilot.commercial.v2
+productName: Edupilot 2 Commercial
+copyright: Copyright © 2026 Edupilot
+buildVersion: 2.0.0
 
 directories:
-  output: release
+  output: release/v2.0.0
   buildResources: build
 
 files:
@@ -21,6 +21,7 @@ win:
   target:
     - nsis
   icon: build/icons/icon.ico
+  executableName: Edupilot2
   requestedExecutionLevel: asInvoker
 
 nsis:
@@ -29,14 +30,14 @@ nsis:
   allowElevation: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Edupilot DZ
+  shortcutName: Edupilot 2 Commercial
   deleteAppDataOnUninstall: false
   installerIcon: build/icons/icon.ico
   uninstallerIcon: build/icons/icon.ico
   installerHeaderIcon: build/icons/icon.ico
   license: false
   menuCategory: true
-  artifactName: EdupilotDZ-Setup-${version}.exe
+  artifactName: Edupilot-2.0.0-Setup.exe
 
 asar: true
 asarUnpack:
