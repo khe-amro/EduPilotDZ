@@ -51,30 +51,47 @@ if (!sourceFile) {
 console.log('Using source:', sourceFile)
 
 async function main() {
-  // 1. 512×512 PNG for macOS/Linux
-  const png512 = path.join(BUILD_ICONS_DIR, 'icon.png')
-  await sharp(sourceFile).resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(png512)
-  console.log('✓ build/icons/icon.png (512x512)')
-
-  // 2. 256×256 PNG for renderer display
-  const png256renderer = path.join(RENDERER_ASSETS_DIR, 'icon.png')
-  await sharp(sourceFile).resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(png256renderer)
-  console.log('✓ src/renderer/assets/icon.png (256x256)')
-
-  // 3. ICO with multiple sizes for Windows
+  const PUBLIC_DIR = path.join(ROOT, 'public')
   const sizes = [16, 24, 32, 48, 64, 128, 256]
   const tmpBuffers = []
+
+  // 1. Generate individual sized PNGs in build/icons/
   for (const size of sizes) {
     const buf = await sharp(sourceFile)
       .resize(size, size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .png()
       .toBuffer()
     tmpBuffers.push(buf)
+
+    const sizeFile = path.join(BUILD_ICONS_DIR, `icon-${size}.png`)
+    fs.writeFileSync(sizeFile, buf)
+    console.log(`✓ build/icons/icon-${size}.png (${size}x${size})`)
+
+    if (size === 256) {
+      fs.writeFileSync(path.join(RENDERER_ASSETS_DIR, 'icon-256.png'), buf)
+      fs.writeFileSync(path.join(PUBLIC_DIR, 'icon-256.png'), buf)
+    }
   }
 
+  // 2. 512×512 PNG master
+  const buf512 = await sharp(sourceFile)
+    .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .png()
+    .toBuffer()
+
+  fs.writeFileSync(path.join(BUILD_ICONS_DIR, 'icon.png'), buf512)
+  fs.writeFileSync(path.join(RENDERER_ASSETS_DIR, 'icon.png'), buf512)
+  fs.writeFileSync(path.join(PUBLIC_DIR, 'icon.png'), buf512)
+  console.log('✓ build/icons/icon.png (512x512)')
+  console.log('✓ src/renderer/assets/icon.png (512x512)')
+  console.log('✓ public/icon.png (512x512)')
+
+  // 3. Multi-size Windows ICO
   const icoBuffer = await pngToIco(tmpBuffers)
   fs.writeFileSync(path.join(BUILD_ICONS_DIR, 'icon.ico'), icoBuffer)
-  console.log('✓ build/icons/icon.ico (multi-size)')
+  fs.writeFileSync(path.join(PUBLIC_DIR, 'favicon.ico'), icoBuffer)
+  console.log('✓ build/icons/icon.ico (multi-size [16, 24, 32, 48, 64, 128, 256])')
+  console.log('✓ public/favicon.ico')
 
   console.log('\nAll icons generated successfully!')
 }
