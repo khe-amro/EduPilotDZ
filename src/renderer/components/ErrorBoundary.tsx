@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component<Props, State> {
       if (typeof window !== 'undefined' && (window as any).schoolApp?.app?.logError) {
         (window as any).schoolApp.app.logError({
           category: 'renderer-render-error',
-          message: error.name || 'RenderError',
+          message: `${error.name}: ${error.message}`,
           componentStack: errorInfo.componentStack?.slice(0, 500),
         })
       }
@@ -77,7 +77,14 @@ export default class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <h2 className="text-lg font-bold text-slate-900 mb-2">{title}</h2>
-            <p className="text-xs text-slate-500 mb-6 leading-relaxed">{subtitle}</p>
+            <p className="text-xs text-slate-500 mb-4 leading-relaxed">{subtitle}</p>
+
+            {this.state.error && (
+              <div className="mb-5 p-3 bg-red-50 border border-red-200 rounded-xl text-left font-mono text-[11px] text-red-800 overflow-x-auto max-h-48 select-text" dir="ltr">
+                <div className="font-bold text-red-900 mb-1">{this.state.error.name}: {this.state.error.message}</div>
+                <div className="text-red-700 whitespace-pre-wrap text-[10px]">{this.state.error.stack}</div>
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5">
               <button

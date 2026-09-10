@@ -118,7 +118,7 @@ const api = {
     unlinkStudent: (studentId: number, guardianId: number) =>
       invoke<boolean>('guardians:unlinkStudent', { studentId, guardianId }),
     forStudent: (studentId: number) =>
-      invoke<Array<{ link: StudentGuardianLink; guardian: Guardian }>>('guardians:forStudent', { studentId }),
+      invoke<StudentGuardianLink[]>('guardians:forStudent', { studentId }),
   },
 
   cards: {

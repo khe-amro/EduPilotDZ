@@ -229,7 +229,7 @@ export default function StudentProfile() {
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
 
   // Guardians data
-  const [studentGuardians, setStudentGuardians] = useState<Array<{ link: StudentGuardianLink; guardian: Guardian }>>([])
+  const [studentGuardians, setStudentGuardians] = useState<StudentGuardianLink[]>([])
   const [familySummaries, setFamilySummaries] = useState<Record<number, FamilySummary>>({})
   const [showAddGuardianModal, setShowAddGuardianModal] = useState(false)
   const [guardianFullName, setGuardianFullName] = useState('')
@@ -369,15 +369,18 @@ export default function StudentProfile() {
         if (activeTab === 'guardians') {
           try {
             const gRes = await window.schoolApp.guardians.forStudent(student!.id)
-            if (gRes.success && gRes.data) {
+            if (gRes.success && Array.isArray(gRes.data)) {
               setStudentGuardians(gRes.data)
               for (const item of gRes.data) {
-                try {
-                  const sumRes = await window.schoolApp.guardians.familySummary(item.guardian.id)
-                  if (sumRes.success && sumRes.data) {
-                    setFamilySummaries((prev) => ({ ...prev, [item.guardian.id]: sumRes.data }))
-                  }
-                } catch { /* ignore */ }
+                const gid = (item as any)?.guardian?.id || (item as any)?.guardianId || (item as any)?.id
+                if (gid) {
+                  try {
+                    const sumRes = await window.schoolApp.guardians.familySummary(gid)
+                    if (sumRes.success && sumRes.data) {
+                      setFamilySummaries((prev) => ({ ...prev, [gid]: sumRes.data }))
+                    }
+                  } catch { /* ignore */ }
+                }
               }
             }
           } catch (e) {
@@ -802,12 +805,17 @@ export default function StudentProfile() {
         setGuardianEmail('')
         setGuardianAddress('')
         const reloadRes = await window.schoolApp.guardians.forStudent(student.id)
-        if (reloadRes.success && reloadRes.data) {
+        if (reloadRes.success && Array.isArray(reloadRes.data)) {
           setStudentGuardians(reloadRes.data)
           for (const item of reloadRes.data) {
-            const sumRes = await window.schoolApp.guardians.familySummary(item.guardian.id)
-            if (sumRes.success && sumRes.data) {
-              setFamilySummaries((prev) => ({ ...prev, [item.guardian.id]: sumRes.data }))
+            const gid = (item as any)?.guardian?.id || (item as any)?.guardianId || (item as any)?.id
+            if (gid) {
+              try {
+                const sumRes = await window.schoolApp.guardians.familySummary(gid)
+                if (sumRes.success && sumRes.data) {
+                  setFamilySummaries((prev) => ({ ...prev, [gid]: sumRes.data }))
+                }
+              } catch { /* ignore */ }
             }
           }
         }
@@ -828,7 +836,12 @@ export default function StudentProfile() {
     try {
       const res = await window.schoolApp.guardians.unlinkStudent(student.id, guardianId)
       if (res.success) {
-        setStudentGuardians((prev) => prev.filter((item) => item.guardian.id !== guardianId))
+        setStudentGuardians((prev) =>
+          prev.filter((item: any) => {
+            const gid = item?.guardian?.id || item?.guardianId || item?.id
+            return gid !== guardianId
+          })
+        )
       } else {
         alert((res as any).error || t('common.error'))
       }
@@ -946,7 +959,10 @@ export default function StudentProfile() {
     return <div className="text-center py-20 text-slate-400">{t('errors.STUDENT_NOT_FOUND')}</div>
   }
 
-  const initials = student.firstNameAr.charAt(0) + student.lastNameAr.charAt(0)
+  const initials = (
+    (student.firstNameAr || student.firstNameFr || 'ط').charAt(0) +
+    (student.lastNameAr || student.lastNameFr || 'ب').charAt(0)
+  ).toUpperCase()
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: t('students.overview') },
@@ -1234,7 +1250,7 @@ export default function StudentProfile() {
                                       {isEnrActive ? t('teachers.active') : t('teachers.inactive')}
                                     </span>
                                   </div>
-                                  <p className="text-slate-400 mt-0.5">{enr.enrollmentDate} · {enr.agreedPrice.toLocaleString()} DA / {t('students.perMonth')}</p>
+                                  <p className="text-slate-400 mt-0.5">{enr.enrollmentDate} · {Number(enr.agreedPrice || 0).toLocaleString()} DA / {t('students.perMonth')}</p>
                                 </div>
                                 <div className="text-end">
                                   {bal < 0 ? (
@@ -1452,7 +1468,7 @@ export default function StudentProfile() {
                                     </span>
                                   </div>
                                   <p className="text-xs text-slate-500 mt-1">
-                                    {t('courses.monthlyPrice')}: <span className="font-bold text-[#0F172A]">{enroll.agreedPrice.toLocaleString()} DA</span> / {t('students.perMonth')}
+                                    {t('courses.monthlyPrice')}: <span className="font-bold text-[#0F172A]">{Number(enroll.agreedPrice || 0).toLocaleString()} DA</span> / {t('students.perMonth')}
                                   </p>
                                   <p className="text-[11px] text-slate-400 mt-0.5">
                                     {t('students.registrationDate')}: {enroll.enrollmentDate}
@@ -1742,11 +1758,15 @@ export default function StudentProfile() {
                       )
                     ) : (
                       <div className="space-y-4">
-                        {studentGuardians.map(({ link, guardian }) => {
-                          const famSum = familySummaries[guardian.id]
+                        {studentGuardians.map((rawItem: any, idx: number) => {
+                          const guardian: Guardian = rawItem?.guardian || rawItem
+                          const link: StudentGuardianLink = rawItem?.link || rawItem
+                          if (!guardian) return null
+                          const guardianId = guardian.id || rawItem?.guardianId || idx
+                          const famSum = familySummaries[guardianId]
 
                           return (
-                            <div key={guardian.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
+                            <div key={guardianId} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-3">
                               <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-full bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold text-sm">
@@ -1754,11 +1774,11 @@ export default function StudentProfile() {
                                   </div>
                                   <div>
                                     <div className="flex items-center gap-2">
-                                      <h5 className="font-bold text-sm text-[#0F172A]">{guardian.fullName}</h5>
+                                      <h5 className="font-bold text-sm text-[#0F172A]">{guardian.fullName || tr('ولي أمر', 'Tuteur', 'Guardian')}</h5>
                                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">
-                                        {link.relationship === 'parent' ? tr('ولي أمر', 'Parent', 'Guardian') : (link.relationship || tr('ولي أمر', 'Parent', 'Guardian'))}
+                                        {link?.relationship === 'parent' ? tr('ولي أمر', 'Parent', 'Guardian') : (link?.relationship || tr('ولي أمر', 'Parent', 'Guardian'))}
                                       </span>
-                                      {link.isPrimary && (
+                                      {link?.isPrimary && (
                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold">
                                           {tr('الجهة الرئيسية', 'Contact principal', 'Primary Contact')}
                                         </span>
@@ -1785,7 +1805,7 @@ export default function StudentProfile() {
                                 <div className="flex items-center gap-2">
                                   {(guardian.whatsappPhone || guardian.phone) && (
                                     <button
-                                      onClick={() => handleOpenWhatsAppModal(guardian.whatsappPhone || guardian.phone || '', guardian.fullName)}
+                                      onClick={() => handleOpenWhatsAppModal(guardian.whatsappPhone || guardian.phone || '', guardian.fullName || '')}
                                       className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                                       title="WhatsApp"
                                     >
@@ -1793,7 +1813,7 @@ export default function StudentProfile() {
                                     </button>
                                   )}
                                   <button
-                                    onClick={() => handleUnlinkGuardian(guardian.id)}
+                                    onClick={() => handleUnlinkGuardian(guardianId)}
                                     className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                     title={tr('فك الارتباط', 'Dissocier', 'Unlink')}
                                   >
@@ -1803,28 +1823,28 @@ export default function StudentProfile() {
                               </div>
 
                               {/* Family Summary box if guardian has multiple children */}
-                              {famSum && (
+                              {famSum && famSum.students && (
                                 <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs">
                                   <div className="flex items-center justify-between mb-2">
                                     <span className="font-bold text-slate-700 flex items-center gap-1.5">
                                       <Users size={13} className="text-[#2563EB]" />
-                                      {tr('الملف العائلي الموحد', 'Fichier familial unifié', 'Unified Family File')} ({famSum.students.length} {tr('أبناء مسجلين', 'enfants inscrits', 'students')})
+                                      {tr('الملف العائلي الموحد', 'Fichier familial unifié', 'Unified Family File')} ({(famSum.students?.length || 0)} {tr('أبناء مسجلين', 'enfants inscrits', 'students')})
                                     </span>
                                     <span className={`font-bold px-2.5 py-0.5 rounded-full ${
-                                      famSum.totalFamilyBalance < 0
+                                      (famSum.totalFamilyBalance ?? 0) < 0
                                         ? 'bg-red-100 text-red-700'
-                                        : famSum.totalFamilyBalance > 0
+                                        : (famSum.totalFamilyBalance ?? 0) > 0
                                         ? 'bg-emerald-100 text-emerald-800'
                                         : 'bg-slate-200 text-slate-700'
                                     }`}>
-                                      {famSum.totalFamilyBalance < 0
-                                        ? `${tr('إجمالي دين العائلة: ', 'Dette totale de la famille : ', 'Total Debt: ')}${Math.abs(famSum.totalFamilyBalance).toLocaleString()} DA`
-                                        : `${tr('إجمالي رصيد العائلة: ', 'Crédit total de la famille : ', 'Total Credit: ')}+${famSum.totalFamilyBalance.toLocaleString()} DA`}
+                                      {(famSum.totalFamilyBalance ?? 0) < 0
+                                        ? `${tr('إجمالي دين العائلة: ', 'Dette totale de la famille : ', 'Total Debt: ')}${Math.abs(famSum.totalFamilyBalance ?? 0).toLocaleString()} DA`
+                                        : `${tr('إجمالي رصيد العائلة: ', 'Crédit total de la famille : ', 'Total Credit: ')}+${(famSum.totalFamilyBalance ?? 0).toLocaleString()} DA`}
                                     </span>
                                   </div>
 
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                                    {famSum.students.map((child) => (
+                                    {Array.isArray(famSum.students) && famSum.students.map((child: any) => (
                                       <div
                                         key={child.id}
                                         onClick={() => child.id !== student.id && navigate(`/students/${child.id}`)}
@@ -1835,7 +1855,7 @@ export default function StudentProfile() {
                                         }`}
                                       >
                                         <div className="flex items-center gap-2">
-                                          <span className="text-xs text-[#0F172A]">{child.firstNameAr} {child.lastNameAr}</span>
+                                          <span className="text-xs text-[#0F172A]">{child.firstNameAr || child.firstNameFr || ''} {child.lastNameAr || child.lastNameFr || ''}</span>
                                           {child.id === student.id && (
                                             <span className="text-[9px] bg-[#2563EB] text-white px-1.5 py-0.2 rounded font-bold">
                                               {tr('الحالي', 'Actuel', 'Current')}
@@ -1843,9 +1863,9 @@ export default function StudentProfile() {
                                           )}
                                         </div>
                                         <span className={`text-xs font-bold font-mono ${
-                                          child.totalBalance < 0 ? 'text-red-600' : child.totalBalance > 0 ? 'text-emerald-600' : 'text-slate-500'
+                                          (child.totalBalance ?? 0) < 0 ? 'text-red-600' : (child.totalBalance ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'
                                         }`}>
-                                          {child.totalBalance < 0 ? `-${Math.abs(child.totalBalance).toLocaleString()} DA` : `+${child.totalBalance.toLocaleString()} DA`}
+                                          {(child.totalBalance ?? 0) < 0 ? `-${Math.abs(child.totalBalance ?? 0).toLocaleString()} DA` : `+${(child.totalBalance ?? 0).toLocaleString()} DA`}
                                         </span>
                                       </div>
                                     ))}
