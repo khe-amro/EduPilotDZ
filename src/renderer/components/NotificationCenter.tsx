@@ -28,11 +28,57 @@ export default function NotificationCenter() {
   const isRTL = i18n.language === 'ar'
   const lang = (i18n.language || 'ar') as 'ar' | 'fr' | 'en'
 
+  const getStoredDismissed = (): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem('edupilot_dismissed_notifications') || '[]')
+    } catch {
+      return []
+    }
+  }
+
+  const saveDismissedId = (id: string) => {
+    try {
+      const current = getStoredDismissed()
+      if (!current.includes(id)) {
+        current.push(id)
+        localStorage.setItem('edupilot_dismissed_notifications', JSON.stringify(current))
+      }
+    } catch {}
+  }
+
+  const saveDismissedIds = (ids: string[]) => {
+    try {
+      const current = getStoredDismissed()
+      const merged = Array.from(new Set([...current, ...ids]))
+      localStorage.setItem('edupilot_dismissed_notifications', JSON.stringify(merged))
+    } catch {}
+  }
+
   const loadNotifications = useCallback(async () => {
     try {
       const res = await window.schoolApp?.notifications?.list?.()
       if (res && res.success && Array.isArray(res.data)) {
-        setNotifications(res.data)
+        const dismissed = getStoredDismissed()
+        let active = res.data.filter((n: SystemNotification) => !dismissed.includes(n.id))
+
+        // Double check real-time debt report to guarantee 100% sync if student has already paid
+        const hasDebtNotif = active.some((n) => n.type === 'debt')
+        if (hasDebtNotif) {
+          try {
+            const debtRes = await window.schoolApp?.payments?.debtReport?.()
+            if (debtRes && debtRes.success && Array.isArray(debtRes.data)) {
+              const overdue = debtRes.data.filter((item: any) => (item.totalDebt || 0) > 0)
+              const realTotalDebt = overdue.reduce((sum: number, item: any) => sum + (item.totalDebt || 0), 0)
+              if (overdue.length === 0 || realTotalDebt <= 0) {
+                active = active.filter((n) => n.type !== 'debt')
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        setNotifications(active)
       }
     } catch {
       // ignore
@@ -72,10 +118,22 @@ export default function NotificationCenter() {
 
   const handleDismiss = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    saveDismissedId(id)
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
     try {
       await window.schoolApp?.notifications?.dismiss?.(id)
-      setNotifications((prev) => prev.filter((n) => n.id !== id))
     } catch {}
+  }
+
+  const handleClearAll = async () => {
+    const ids = notifications.map((n) => n.id)
+    saveDismissedIds(ids)
+    setNotifications([])
+    for (const id of ids) {
+      try {
+        await window.schoolApp?.notifications?.dismiss?.(id)
+      } catch {}
+    }
   }
 
   const handleAction = (notif: SystemNotification) => {
@@ -142,7 +200,7 @@ export default function NotificationCenter() {
             </div>
             {notifications.length > 0 && (
               <button
-                onClick={() => setNotifications([])}
+                onClick={handleClearAll}
                 className="text-[11px] text-slate-400 hover:text-slate-600 font-medium cursor-pointer"
               >
                 {isRTL ? 'مسح الكل' : lang === 'fr' ? 'Tout effacer' : 'Clear all'}
